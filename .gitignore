@@ -1,0 +1,177 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+# myenv/ # Uncomment if you use a specific name like 'myenv'
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+# Usually dist/ FOLDER is enough - NO NEED to explicitly ignore app NAME
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Profiling
+*.prof
+*.pstats
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# static PyLint results
+.pylint.d/
+
+# PEP 582; __pypackages__ directory
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath files
+.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# IDE - PyCharm
+#.idea/ # General PyCharm project files
+#*.iml   # Module files
+# If you want to share some PyCharm settings but not user-specific ones:
+.idea/*
+!.idea/misc.xml
+!.idea/modules.xml
+!.idea/workspace.xml
+!.idea/encodings.xml
+!.idea/vcs.xml # if you want to share VCS integration settings
+# User-specific PyCharm files (definitely ignore)
+.idea/shelf/
+.idea/dictionaries/
+.idea/userSettings/
+.idea/dataSources/
+.idea/dataSources.ids
+.idea/dataSources.local.xml
+.idea/dynamic.xml
+.idea/uiDesigner.xml
+.idea/dbnavigator.xml
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.Spotlight-V100
+.Trashes
+
+# Streamlit
+# Streamlit apps typically don't generate many ignorable files in the project root itself,
+# but if you have specific caching or session state behavior that writes locally in an untracked way.
+# Secrets file if not using Streamlit Cloud's secrets management
+.streamlit/secrets.toml
+
+# Project Specific
+# This application stores project-specific data, including configurations with API keys,
+# and downloaded data in a 'data/' directory. This should NOT be committed to version control.
+/data/
+
+# If your main config.yaml could ever contain secrets (it shouldn't by design here)
+# you might ignore it, but for this app it's for general non-sensitive config.
+# config.yaml
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*~
+*.swp
+*.swo
+
+# Credentials & Sensitive Files (general good practice)
+credentials.json
+client_secret*.json # For Google OAuth, though ideally fetched or env var
+secrets.yaml
+*.key
+*.pem
