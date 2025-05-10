@@ -1,0 +1,226 @@
+# Qualitative Thematic Analysis Tool for Reddit Data
+
+This Streamlit application is designed to assist qualitative researchers in performing thematic analysis on Reddit data. It allows users to authenticate with Reddit, download posts based on specific queries, and then leverage generative AI (OpenAI or Gemini) to generate codes, identify patterns, and derive themes from the text data.
+
+## Features
+
+*   **Project-Based Workflow:** Organize your analysis into distinct projects.
+*   **Flexible Data Storage:**
+    *   **Local Storage:** Choose any folder on your computer to store project data and configurations.
+    *   **Cloud Storage (Conceptual for Data, Local for Config):**
+        *   **OneDrive:** Functional authentication using Device Flow. (Data storage/retrieval from OneDrive would require further Microsoft Graph API integration).
+        *   **Google Drive/Dropbox:** Placeholders for potential future integration. Project configuration files for cloud projects are stored locally.
+*   **Reddit Data Retrieval:**
+    *   Fetch posts from specified subreddits.
+    *   Filter by search queries, sort order, and timeframes.
+*   **Interactive Data Management:**
+    *   View and search fetched data in an interactive table.
+    *   Edit data directly within the application (changes saved to "Processed Data").
+    *   **PII Redaction:** Automatically redact sensitive information (like names, emails, phone numbers) using Microsoft Presidio Analyzer, with a new redacted column created.
+*   **AI-Assisted Thematic Coding:**
+    *   Choose between OpenAI or Google Gemini for generative AI tasks.
+    *   Generate initial thematic codes based on user-defined prompts.
+    *   View and manage AI-generated codes.
+*   **Filtering and Views:**
+    *   Filter data based on assigned codes.
+    *   Save and load filtered "views" of your data for focused analysis.
+*   **Clustering and Theme Generation (Conceptual & Simulated):**
+    *   Simulate clustering of data based on codes.
+    *   Generate AI-driven summaries for (simulated) clusters to help identify overarching themes.
+*   **Visualizations:**
+    *   Generate word clouds from text data or AI codes.
+    *   Display frequency charts for AI-generated codes.
+*   **Secure API Key Management:** API keys are stored within project-specific configuration files, locally.
+
+## Workflow Overview
+
+1.  **Setup & Configuration (Tab 1):**
+    *   **Create/Load Project:**
+        *   Provide a project name.
+        *   Select storage type:
+            *   **Local:** Enter the absolute path to a parent folder on your computer where the project-specific subfolder will be created.
+            *   **OneDrive:** Authenticate using the Device Flow. Project configuration is stored locally.
+            *   **Google Drive/Dropbox:** Conceptual. Project configuration is stored locally.
+    *   **API Key Management:**
+        *   **Reddit API Credentials:** Obtain and enter your Reddit Client ID, Client Secret, and a unique User Agent.
+        *   **Generative AI Keys:** Select your AI provider (OpenAI or Gemini) and enter the corresponding API key.
+        *   Save keys to the project configuration.
+
+2.  **Data Retrieval & Preparation (Tab 2):**
+    *   **Fetch Reddit Data:** Specify subreddit, search query, number of posts, sort order, and time filter.
+    *   **View/Edit Data:** Inspect raw and processed data in interactive tables. Make edits as needed (primarily on "Processed Data").
+    *   **Redact Data:** Select a text column in your "Processed Data" for PII redaction using Microsoft Presidio. A new `_redacted` column will be created.
+
+3.  **Coding & View Management (Tab 3):**
+    *   **AI-Assisted Coding:**
+        *   Select the text column (preferably a redacted one) for coding.
+        *   Choose your AI provider and model.
+        *   Customize the AI prompt for code generation.
+        *   Generate codes. An `ai_codes` column will be added to your "Processed Data".
+    *   **Filter & Group:** Filter your "Processed Data" based on the generated `ai_codes`.
+    *   **Save/Load Views:** Save filtered datasets as named "views" and load them later for focused analysis.
+
+4.  **Analysis & Visualization (Tab 4):**
+    *   **Clustering (Simulated):** Simulate the clustering of data based on codes to group similar items.
+    *   **AI Theme Summaries:** Generate AI-driven summaries for each (simulated) cluster to help understand potential themes.
+    *   **Visualizations:** Create word clouds (from text or codes) and bar charts of code frequencies.
+
+## Getting Started
+
+### Prerequisites
+
+*   Python 3.8+
+*   Access to a Reddit account.
+*   API keys for Reddit.
+*   API key for either OpenAI or Google Gemini.
+*   (For OneDrive) An Azure AD application registration with the appropriate permissions and Client ID.
+
+### Installation
+
+1.  **Clone the repository (or download the files):**
+    ```bash
+    # If you have git installed
+    # git clone <repository_url>
+    # cd <repository_name>
+    ```
+    If you downloaded a ZIP, extract it.
+
+2.  **Create a Python virtual environment (recommended):**
+    ```bash
+    python -m venv .venv
+    # On Windows
+    # .venv\Scripts\activate
+    # On macOS/Linux
+    # source .venv/bin/activate
+    ```
+
+3.  **Install dependencies:**
+    Navigate to the project's root directory (where `requirements.txt` is located) and run:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Configure OneDrive Client ID (if using OneDrive):**
+    *   Open the file `modules/auth.py`.
+    *   Find the line: `ONEDRIVE_CLIENT_ID = "YOUR_ACTUAL_ONEDRIVE_APP_CLIENT_ID"`
+    *   Replace `"YOUR_ACTUAL_ONEDRIVE_APP_CLIENT_ID"` with the actual "Application (client) ID" from your Azure app registration. Save the file.
+    *   For details on Azure app registration, see "Setting up OneDrive Integration" below.
+
+### Running the Application
+
+1.  Navigate to the project's root directory in your terminal.
+2.  Run the Streamlit app:
+    ```bash
+    streamlit run app.py
+    ```
+3.  The application will open in your web browser.
+
+## Setting up API Credentials
+
+### 1. Reddit API Credentials
+
+To allow the application to fetch data from Reddit, you need to create a "script" type application on Reddit:
+
+1.  **Log in to Reddit:**
+    *   Go to [www.reddit.com](https://www.reddit.com) and log in.
+
+2.  **Navigate to the "apps" page:**
+    *   Go to: [https://www.reddit.com/prefs/apps](https://www.reddit.com/prefs/apps)
+
+3.  **Click "are you a developer? create an app..." button:**
+    *   Scroll down and click this button.
+
+4.  **Fill out the application form:**
+    *   **name:** A unique name for your app (e.g., `ThemelyApp_YourUsername`).
+    *   **Type:** Select the **`script`** radio button.
+    *   **description:** (Optional) E.g., "Streamlit app for thematic analysis."
+    *   **about url:** (Optional) E.g., `http://localhost` or your GitHub repo URL.
+    *   **redirect uri:** For script apps, a common placeholder is `http://localhost:8080`.
+
+5.  **Click "create app".**
+
+6.  **Get Your Credentials:**
+    *   On the next page, you will find:
+        *   **Client ID:** A string of characters **underneath your app's name** (labeled "personal use script").
+        *   **Client Secret:** A string of characters next to the word **`secret`**.
+    *   Copy these two values.
+
+7.  **User Agent:**
+    *   Reddit requires a unique User-Agent string. A good format is: `<platform>:<app_ID>:<version_string> by /u/<your_Reddit_username>`.
+    *   Example: `Python:ThemelyApp:v0.1 by /u/MyRedditUserName123`
+
+8.  **Enter in the App:**
+    *   In Tab 1 of the Streamlit application, under "Reddit API Credentials", enter your Client ID, Client Secret, and the User Agent you created. Save the keys.
+
+### 2. Generative AI API Keys (OpenAI or Gemini)
+
+*   **OpenAI:**
+    *   Go to [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+    *   Create a new secret key. Copy it.
+    *   In Tab 1 of the Streamlit app, select "OpenAI", paste your key, and save.
+*   **Google Gemini:**
+    *   Go to [makersuite.google.com/app/apikey](https://makersuite.google.com/app/apikey) (or search for "Google AI Studio API Key").
+    *   Create an API key. Copy it.
+    *   In Tab 1 of the Streamlit app, select "Gemini", paste your key, and save.
+
+### 3. Setting up OneDrive Integration (Optional)
+
+If you plan to use OneDrive for (conceptual) project storage:
+
+1.  **Register an application in the Azure portal:**
+    *   Go to [Azure App registrations](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade).
+    *   Click "New registration".
+    *   **Name:** E.g., `StreamlitQualitativeAnalysisApp`.
+    *   **Supported account types:** Choose "Accounts in any organizational directory (Any Azure AD directory - Multitenant) and personal Microsoft accounts (e.g. Skype, Xbox)".
+    *   **Redirect URI:** Not needed for device flow; leave blank.
+    *   Click "Register".
+2.  **Get Application (client) ID:**
+    *   On the app's "Overview" page, copy the **Application (client) ID**.
+3.  **Enable public client flows:**
+    *   In your app registration, go to "Authentication".
+    *   Scroll to "Advanced settings".
+    *   Set "Allow public client flows" to **Yes**. Save.
+4.  **API Permissions:**
+    *   Go to "API permissions".
+    *   Click "Add a permission" -> "Microsoft Graph" -> "Delegated permissions".
+    *   Search for and add:
+        *   `Files.ReadWrite.AppFolder` (allows the app to read/write to its own dedicated folder in OneDrive)
+        *   `User.Read` (to read the user's profile)
+        *   `offline_access` (to get refresh tokens for persistent access)
+    *   Click "Add permissions".
+    *   You might need an admin to "Grant admin consent" for these permissions depending on your organization. For personal accounts, you grant consent during the login flow.
+5.  **Update `modules/auth.py`:**
+    *   Open `modules/auth.py` in a text editor.
+    *   Find the line: `ONEDRIVE_CLIENT_ID = "YOUR_ACTUAL_ONEDRIVE_APP_CLIENT_ID"`
+    *   Replace `"YOUR_ACTUAL_ONEDRIVE_APP_CLIENT_ID"` with the Application (client) ID you copied from Azure. Save the file.
+
+## Project Structure
+
+*   `app.py`: Main entry point for the Streamlit application.
+*   `config.yaml`: (Currently minimal use) General application configuration.
+*   `requirements.txt`: Python dependencies.
+*   `.gitignore`: Specifies intentionally untracked files for Git.
+*   `README.md`: This file.
+*   `modules/`: Contains the core logic:
+    *   `auth.py`: Handles authentication for cloud services and project setup.
+    *   `reddit_api.py`: Manages Reddit API requests and data retrieval.
+    *   `ai_services.py`: Manages interactions with OpenAI and Google Gemini APIs.
+    *   `data_management.py`: Handles data storage (local CSVs), redaction (Presidio), and view management.
+    *   `ui_helpers.py`: UI components (notifications, tables, etc.).
+    *   `utils.py`: Utility functions (config management, logging, error handling).
+*   `data/`: (Created by the app if it doesn't exist, **should be in .gitignore**)
+    *   This folder, or a user-specified folder for local projects, will contain subfolders for each project, storing:
+        *   `{project_name}_config.yaml`: Project-specific configuration including API keys.
+        *   `reddit_data.csv`: Raw data fetched from Reddit.
+        *   `processed_data.csv`: Data after redaction, with AI codes, etc.
+        *   `views/`: Subfolder for saved filtered data views.
+    *   `project_configs_for_cloud_storage/`: (Created by the app) Stores local YAML config files for projects designated for cloud storage.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a pull request or open an issue for bugs, feature requests, or improvements.
+
+## License
+
+(Consider adding a license, e.g., MIT License)
+This project is open-source and available under the [MIT License](LICENSE.txt). (You would need to create a LICENSE.txt file).
