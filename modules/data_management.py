@@ -1,217 +1,223 @@
 # modules/data_management.py
-
 import streamlit as st
 import pandas as pd
-from presidio_analyzer import AnalyzerEngine #, RecognizerRegistry (if customizing)
-# from presidio_analyzer.recognizer_registry import RecognizerRegistry # Example if you want to customize
-# from presidio_pii_recognizers import CreditCardRecognizer # Example
+from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 from . import ui_helpers, utils
 import os
-import json # For saving/loading data if not using CSV/Parquet
+import json
+import glob
+from datetime import datetime
 
 logger = utils.setup_logger(__name__)
 
-# --- Presidio Setup (Lazy initialization inside functions) ---
-@st.cache_resource # Cache the Presidio engines for performance
+@st.cache_resource
 def get_presidio_analyzer_instance():
-    """Returns a cached instance of Presidio AnalyzerEngine."""
-    # Configure to load only necessary recognizers for better performance if needed
-    # Example:
-    # recognizer_registry = RecognizerRegistry()
-    # recognizer_registry.load_predefined_recognizers()
-    # # Add or remove recognizers here if needed
-    # # recognizer_registry.add_recognizer(CreditCardRecognizer(supported_language="en"))
-    # analyzer = AnalyzerEngine(registry=recognizer_registry, supported_languages=["en"])
     logger.info("Initializing Presidio AnalyzerEngine instance.")
     return AnalyzerEngine()
 
 @st.cache_resource
 def get_presidio_anonymizer_instance():
-    """Returns a cached instance of Presidio AnonymizerEngine."""
     logger.info("Initializing Presidio AnonymizerEngine instance.")
     return AnonymizerEngine()
 
-# --- Data Storage and Retrieval (Project Specific) ---
-def save_data_to_project(df, data_filename="reddit_data.csv"):
-    """Saves DataFrame to the project's path."""
-    if 'project_path' not in st.session_state or not st.session_state.project_path:
-        ui_helpers.show_error_message("Project path not set. Cannot save data.")
-        return False
+DOWNLOADS_SUBFOLDER = "reddit_downloads"
+VIEWS_SUBFOLDER = "project_views"
 
-    project_path = st.session_state.project_path # This should be the folder path
-    file_path = os.path.join(project_path, data_filename)
-
-    try:
-        # Using CSV for simplicity, Parquet or JSON Lines could be alternatives
-        df.to_csv(file_path, index=False)
-        # ui_helpers.show_success_message(f"Data saved successfully to {file_path}") # Can be too noisy
-        logger.info(f"Data saved to {file_path}")
-        return True
-    except Exception as e:
-        ui_helpers.show_error_message(f"Error saving data to '{file_path}': {e}")
-        logger.error(f"Error saving data to {file_path}: {e}")
-        return False
-
-def load_data_from_project(data_filename="reddit_data.csv"):
-    """Loads DataFrame from the project's path."""
-    if 'project_path' not in st.session_state or not st.session_state.project_path:
-        return None
-
+def save_downloaded_reddit_data(df, subreddit_name, query_str, fetch_params, timestamp):
     project_path = st.session_state.project_path
-    file_path = os.path.join(project_path, data_filename)
-
-    if not os.path.exists(file_path):
+    if not project_path:
+        ui_helpers.show_error_message("Project path not set. Cannot save downloaded Reddit data.")
+        return None
+    downloads_dir = os.path.join(project_path, DOWNLOADS_SUBFOLDER)
+    try: os.makedirs(downloads_dir, exist_ok=True)
+    except OSError as e:
+        ui_helpers.show_error_message(f"Could not create downloads directory '{downloads_dir}': {e}")
+        return None
+    ts_str = timestamp.strftime("%Y%m%d_%H%M%S")
+    sub_sanitized = utils.sanitize_for_filename(subreddit_name, 20)
+    query_sanitized = utils.sanitize_for_filename(query_str if query_str else "all_posts", 30)
+    filename = f"reddit_data_{sub_sanitized}_{query_sanitized}_{ts_str}.csv"
+    file_path = os.path.join(downloads_dir, filename)
+    try:
+        df.to_csv(file_path, index=False)
+        logger.info(f"Saved downloaded Reddit data to: {file_path}")
+        return file_path
+    except Exception as e:
+        ui_helpers.show_error_message(f"Error saving downloaded Reddit data to '{file_path}': {e}")
         return None
 
-    try:
-        df = pd.read_csv(file_path)
-        logger.info(f"Data loaded from {file_path}")
-        return df
+def list_downloaded_files_metadata():
+    project_path = st.session_state.project_path
+    if not project_path: return []
+    downloads_dir = os.path.join(project_path, DOWNLOADS_SUBFOLDER)
+    if not os.path.isdir(downloads_dir): return []
+    all_files_metadata = []
+    for filename in os.listdir(downloads_dir):
+        if filename.startswith("reddit_data_") and filename.endswith(".csv"):
+            file_path = os.path.join(downloads_dir, filename)
+            try:
+                parts = filename.replace("reddit_data_", "").replace(".csv", "").split('_')
+                metadata = {
+                    "filename": filename, "filepath": file_path,
+                    "subreddit": parts[0] if len(parts) > 0 else "N/A",
+                    "query_used": parts[1] if len(parts) > 1 else "N/A",
+                    "download_timestamp_str": f"{parts[-2]}_{parts[-1]}" if len(parts) >= 3 else "N/A",
+                    "download_datetime": datetime.strptime(f"{parts[-2]}_{parts[-1]}", "%Y%m%d_%H%M%S") if len(parts) >=3 else datetime.min,
+                    "fetch_params_placeholder": "Params not stored with this version" # Placeholder
+                }
+                all_files_metadata.append(metadata)
+            except Exception as e:
+                logger.warning(f"Could not parse metadata from filename '{filename}': {e}")
+                all_files_metadata.append({"filename": filename, "filepath": file_path, "subreddit": "ParseError", "download_datetime": datetime.min})
+    all_files_metadata.sort(key=lambda x: x.get("download_datetime", datetime.min), reverse=True)
+    return all_files_metadata
+
+def load_data_from_specific_file(file_path):
+    if not file_path or not os.path.isfile(file_path):
+        logger.warning(f"File not found or path is invalid: {file_path}")
+        return None
+    try: return pd.read_csv(file_path)
     except Exception as e:
         ui_helpers.show_error_message(f"Error loading data from '{file_path}': {e}")
-        logger.error(f"Error loading data from {file_path}: {e}")
         return None
 
-# --- Data Redaction ---
-def redact_text_column(df, column_name):
+def save_project_view(df_view, view_name, source_filenames_info=None):
+    project_path = st.session_state.project_path
+    if not project_path:
+        ui_helpers.show_error_message("Project path not set. Cannot save view.")
+        return False
+    views_dir = os.path.join(project_path, VIEWS_SUBFOLDER)
+    try: os.makedirs(views_dir, exist_ok=True)
+    except OSError as e:
+        ui_helpers.show_error_message(f"Could not create views directory '{views_dir}': {e}")
+        return False
+    safe_view_name = utils.sanitize_for_filename(view_name, 50)
+    view_filename_csv = f"{safe_view_name}.csv"
+    view_filepath_csv = os.path.join(views_dir, view_filename_csv)
+    view_filename_meta = f"{safe_view_name}_meta.json"
+    view_filepath_meta = os.path.join(views_dir, view_filename_meta)
+    try:
+        df_view.to_csv(view_filepath_csv, index=False)
+        view_metadata = {
+            "view_name": view_name, "csv_filename": view_filename_csv,
+            "creation_timestamp": datetime.now().isoformat(),
+            "source_files_info": source_filenames_info if source_filenames_info else "Not specified"
+        }
+        with open(view_filepath_meta, 'w') as f_meta: json.dump(view_metadata, f_meta, indent=4)
+        # ui_helpers.show_success_message(f"View '{view_name}' saved successfully.") # Message moved to app.py
+        logger.info(f"View '{view_name}' (CSV and Meta) saved to {views_dir}")
+        return True
+    except Exception as e:
+        ui_helpers.show_error_message(f"Error saving view '{view_name}': {e}")
+        return False
+
+def list_created_views_metadata():
+    project_path = st.session_state.project_path
+    if not project_path: return []
+    views_dir = os.path.join(project_path, VIEWS_SUBFOLDER)
+    if not os.path.isdir(views_dir): return []
+    all_views_metadata = []
+    for filename in os.listdir(views_dir):
+        if filename.endswith("_meta.json"):
+            meta_filepath = os.path.join(views_dir, filename)
+            try:
+                with open(meta_filepath, 'r') as f_meta: meta_content = json.load(f_meta)
+                meta_content["csv_filepath"] = os.path.join(views_dir, meta_content.get("csv_filename", ""))
+                all_views_metadata.append(meta_content)
+            except Exception as e: logger.warning(f"Could not parse view metadata from '{filename}': {e}")
+    all_views_metadata.sort(key=lambda x: x.get("creation_timestamp") or "", reverse=True)
+    return all_views_metadata
+
+def save_coded_data_to_view(df_coded_view, view_csv_filepath):
+    if not view_csv_filepath or not os.path.isabs(view_csv_filepath):
+        ui_helpers.show_error_message(f"Invalid file path for saving coded view: {view_csv_filepath}")
+        return False
+    view_dir = os.path.dirname(view_csv_filepath)
+    if not os.path.isdir(view_dir):
+        ui_helpers.show_error_message(f"View directory does not exist: {view_dir}")
+        return False
+    try:
+        df_coded_view.to_csv(view_csv_filepath, index=False)
+        logger.info(f"Coded data saved to view file: {view_csv_filepath}")
+        return True
+    except Exception as e:
+        ui_helpers.show_error_message(f"Error saving coded data to view '{view_csv_filepath}': {e}")
+        return False
+
+# --- Data Redaction (Modifies DataFrame in place) ---
+def redact_text_column_in_place(df_to_modify, column_name):
     """
-    Redacts sensitive information from a specified text column in the DataFrame.
-    Uses Microsoft Presidio.
+    Redacts sensitive information directly in the specified text column of the DataFrame.
+    This is a destructive operation on the passed DataFrame.
+    Returns the number of PII items found and processed.
     """
-    analyzer = get_presidio_analyzer_instance() # Get instance when needed
-    anonymizer = get_presidio_anonymizer_instance() # Get instance when needed
+    analyzer = get_presidio_analyzer_instance()
+    anonymizer = get_presidio_anonymizer_instance()
 
-    if column_name not in df.columns:
-        ui_helpers.show_error_message(f"Column '{column_name}' not found in data.")
-        return df, 0 # Return original df and 0 redactions
+    if column_name not in df_to_modify.columns:
+        ui_helpers.show_error_message(f"Column '{column_name}' not found in data for redaction.")
+        return 0 # Return 0 redactions
 
-    redacted_texts = []
-    total_redactions_found = 0 # More accurate naming
-
-    # Define anonymization strategy, e.g., replace with <ENTITY_TYPE>
-    operators = {
+    total_redactions_found = 0
+    operators = { # Define your redaction operators
         "DEFAULT": OperatorConfig("replace", {"new_value": "<REDACTED>"}),
         "PHONE_NUMBER": OperatorConfig("mask", {"type": "mask", "masking_char": "*", "chars_to_mask": 12, "from_end": False}),
         "CREDIT_CARD": OperatorConfig("replace", {"new_value": "<CREDIT_CARD>"}),
         "EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "<EMAIL>"}),
         "PERSON": OperatorConfig("replace", {"new_value": "<PERSON>"}),
         "LOCATION": OperatorConfig("replace", {"new_value": "<LOCATION>"}),
-        # Add more entity-specific operators if needed
     }
 
+    # Create a list of texts to be redacted
+    texts_to_redact = df_to_modify[column_name].astype(str).tolist()
+    redacted_texts_list = []
+
     progress_bar = st.progress(0, text=f"Redacting data in column '{column_name}'...")
-    df_length = len(df)
+    num_rows = len(texts_to_redact)
 
-    for i, text in enumerate(df[column_name].astype(str)): # Ensure text is string
-        if pd.isna(text) or not text.strip():
-            redacted_texts.append(text) # Keep NaN or empty as is
-            if df_length > 0:
-                progress_bar.progress((i + 1) / df_length, text=f"Processing row {i+1}/{df_length}...")
-            continue
-        try:
-            # Analyze text to find PII
-            analyzer_results = analyzer.analyze(text=text, language='en')
-
-            # Anonymize text using the results from the analyzer
-            anonymized_result = anonymizer.anonymize(
-                text=text,
-                analyzer_results=analyzer_results,
-                operators=operators
-            )
-            redacted_texts.append(anonymized_result.text)
-            if len(analyzer_results) > 0:
-                total_redactions_found += len(analyzer_results)
-        except Exception as e:
-            logger.error(f"Error during redaction of row {i} for column '{column_name}': {e}")
-            redacted_texts.append(text) # Keep original text on error for that row
-
-        if df_length > 0:
-            progress_bar.progress((i + 1) / df_length, text=f"Processing row {i+1}/{df_length}...")
+    for i, text_content in enumerate(texts_to_redact):
+        if pd.isna(text_content) or not str(text_content).strip():
+            redacted_texts_list.append(text_content) # Keep NaN or empty as is
+        else:
+            try:
+                analyzer_results = analyzer.analyze(text=text_content, language='en')
+                anonymized_result = anonymizer.anonymize(
+                    text=text_content,
+                    analyzer_results=analyzer_results,
+                    operators=operators
+                )
+                redacted_texts_list.append(anonymized_result.text)
+                if len(analyzer_results) > 0:
+                    total_redactions_found += len(analyzer_results)
+            except Exception as e:
+                logger.error(f"Error during redaction of row {i} for column '{column_name}': {e}")
+                redacted_texts_list.append(text_content) # Keep original text on error for that row
+        
+        if num_rows > 0:
+            progress_bar.progress((i + 1) / num_rows, text=f"Processing row {i+1}/{num_rows} for redaction...")
 
     progress_bar.empty()
-
-    df_copy = df.copy() # Work on a copy to avoid SettingWithCopyWarning issues
-    new_column_name = column_name + '_redacted'
-    df_copy[new_column_name] = redacted_texts
-
-    # No direct UI message here as per earlier decision, app.py will handle it
-    # if total_redactions_found > 0:
-    #     ui_helpers.show_success_message(f"Sensitive data redacted. {total_redactions_found} items processed. New column '{new_column_name}' created.")
-    # else:
-    #     ui_helpers.show_warning_message(f"No sensitive data found by Presidio for redaction in '{column_name}'. New column '{new_column_name}' created.")
-
-    return df_copy, total_redactions_found
+    
+    # Update the column in the original DataFrame directly
+    df_to_modify[column_name] = redacted_texts_list
+    
+    return total_redactions_found
 
 
-# --- Data Editing, Filtering, etc. ---
-# These functionalities will often be directly implemented in app.py using Streamlit's
-# interactive widgets (like st.data_editor for editing, multiselect for filtering).
-
-def add_codes_to_data(df, codes_list, new_code_column='ai_codes'):
-    """
-    Adds a list of codes to the DataFrame. Assumes codes_list matches df row count.
-    codes_list: A list of lists, where each inner list contains codes for a row.
-    """
-    if len(df) != len(codes_list):
-        ui_helpers.show_error_message("Mismatch between data rows and generated codes count.")
-        logger.error(f"Data rows ({len(df)}) and codes count ({len(codes_list)}) mismatch.")
-        return df # Return original df
-
-    df_copy = df.copy()
-    df_copy[new_code_column] = codes_list
-    return df_copy
-
-def save_view(df_view, view_name):
-    """Saves a filtered/grouped DataFrame view to the project."""
-    if 'project_path' not in st.session_state or not st.session_state.project_path:
-        ui_helpers.show_error_message("Project path not set. Cannot save view.")
-        return False
-
+# --- Legacy functions (kept for compatibility if needed, but new flows should use specific ones) ---
+def save_data_to_project(df, data_filename="generic_data.csv"):
     project_path = st.session_state.project_path
-    views_subfolder = "views"
-    views_dir_path = os.path.join(project_path, views_subfolder)
+    if not project_path: return False # Simplified error handling for generic func
+    file_path = os.path.join(project_path, data_filename)
+    try: df.to_csv(file_path, index=False); return True
+    except Exception: return False
 
-    # Sanitize view_name for filename
-    safe_view_name = "".join(c if c.isalnum() else "_" for c in view_name)
-    view_filename = f"view_{safe_view_name.lower()}.csv"
-    file_path = os.path.join(views_dir_path, view_filename)
-
-    try:
-        os.makedirs(views_dir_path, exist_ok=True)
-        df_view.to_csv(file_path, index=False)
-        ui_helpers.show_success_message(f"View '{view_name}' saved successfully to project 'views' folder.")
-        logger.info(f"View '{view_name}' saved to {file_path}")
-        return True
-    except Exception as e:
-        ui_helpers.show_error_message(f"Error saving view '{view_name}': {e}")
-        logger.error(f"Error saving view '{view_name}' to {file_path}: {e}")
-        return False
-
-def load_saved_views():
-    """Lists and allows loading of saved views."""
-    if 'project_path' not in st.session_state or not st.session_state.project_path:
-        return {} # No project path, so no views to load
-
+def load_data_from_project(data_filename="generic_data.csv"):
     project_path = st.session_state.project_path
-    views_subfolder = "views"
-    views_dir_path = os.path.join(project_path, views_subfolder)
-
-    if not os.path.exists(views_dir_path):
-        return {} # Views folder doesn't exist
-
-    saved_views = {}
-    try:
-        for filename in os.listdir(views_dir_path):
-            if filename.startswith("view_") and filename.endswith(".csv"):
-                # Attempt to reconstruct a more readable view name
-                # from: view_my_awesome_view.csv -> My Awesome View
-                name_part = filename.replace("view_", "", 1).replace(".csv", "")
-                view_name = " ".join(word.capitalize() for word in name_part.split("_"))
-                saved_views[view_name] = os.path.join(views_dir_path, filename)
-    except Exception as e:
-        logger.error(f"Error listing saved views from '{views_dir_path}': {e}")
-        ui_helpers.show_error_message(f"Could not read saved views: {e}")
-        return {}
-    return saved_views
+    if not project_path: return None
+    file_path = os.path.join(project_path, data_filename)
+    if not os.path.exists(file_path): return None
+    try: return pd.read_csv(file_path)
+    except Exception: return None

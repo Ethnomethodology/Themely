@@ -1,83 +1,131 @@
 # modules/utils.py
-
 import yaml
 import logging
 import streamlit as st
 import os
+import re # For more advanced sanitization
 
-# Configuration file path
-CONFIG_FILE = 'config.yaml' # General app config (currently minimal use)
-PROJECT_CONFIG_FILE_TEMPLATE = "{project_name}_config.yaml" # Project-specific config
+# --- Other Utilities (like generate_project_id) first if needed by config functions ---
+def generate_project_id(project_name_str):
+    """
+    Generates a simple, filesystem-friendly ID from a project name string.
+    Used for default config filenames.
+    """
+    if not project_name_str: return "default_project"
+    sanitized = str(project_name_str).strip().lower()
+    sanitized = re.sub(r'\s+', '_', sanitized) # Replace spaces with underscores
+    sanitized = re.sub(r'[^\w_.-]', '', sanitized) # Remove unwanted characters, allow _ . -
+    sanitized = sanitized[:50] # Truncate to a reasonable length for filenames
+    while '__' in sanitized: sanitized = sanitized.replace('__', '_')
+    sanitized = sanitized.strip('_.- ')
+    return sanitized if sanitized else "project"
 
-# --- Configuration Management ---
-def load_config():
-    """Loads the main application configuration from config.yaml."""
+def sanitize_for_filename(text_str, max_length=30):
+    """
+    Sanitizes a string to be more suitable for use in a filename,
+    especially for query parts. More aggressive than generate_project_id.
+    """
+    if not text_str: return "no_query"
+    sanitized = str(text_str).strip().lower()
+    sanitized = re.sub(r'\s+', '_', sanitized)
+    sanitized = re.sub(r'[^\w-]', '', sanitized) # Allow only word characters and hyphens
+    sanitized = sanitized[:max_length]
+    sanitized = sanitized.strip('_')
+    return sanitized if sanitized else "query"
+
+
+# --- Configuration file naming template ---
+PROJECT_CONFIG_FILE_TEMPLATE = "{project_name_id}_config.yaml"
+
+# --- Logging Setup ---
+def setup_logger(name):
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    return logger
+
+module_logger = setup_logger(__name__)
+
+# --- Global Application Configuration ---
+def load_app_config(config_filename='config.yaml'):
     try:
-        with open(CONFIG_FILE, 'r') as f:
+        with open(config_filename, 'r') as f:
             config = yaml.safe_load(f)
-        if config is None:
-            return {}
-        return config
-    except FileNotFoundError:
-        # If the global config file doesn't exist, return empty dict, not an error
-        return {}
+        return config if config else {}
+    except FileNotFoundError: return {}
     except yaml.YAMLError as e:
-        st.error(f"Error loading global configuration ({CONFIG_FILE}): {e}")
+        st.error(f"Error loading global application configuration '{config_filename}': {e}")
         return {}
 
-def save_config(config_data):
-    """Saves the main application configuration to config.yaml."""
+def save_app_config(config_data, config_filename='config.yaml'):
     try:
-        with open(CONFIG_FILE, 'w') as f:
+        with open(config_filename, 'w') as f:
             yaml.dump(config_data, f, default_flow_style=False)
-    except IOError as e:
-        st.error(f"Error saving global configuration ({CONFIG_FILE}): {e}")
+    except IOError as e: st.error(f"Error saving global application configuration to '{config_filename}': {e}")
 
-def load_project_config(project_base_path, project_name):
-    """
-    Loads project-specific configuration.
-    project_base_path: The directory where the project's folder itself resides.
-                       e.g., if project is at 'data/my_project/', then project_base_path is 'data/my_project/'
-    """
-    config_filename = PROJECT_CONFIG_FILE_TEMPLATE.format(project_name=project_name)
-    config_path = os.path.join(project_base_path, config_filename)
+
+# --- Project-Specific Configuration Management ---
+def load_project_config(config_file_directory, project_name_user_given):
+    if not project_name_user_given:
+        module_logger.error("User-given project name is empty, cannot load project config.")
+        return {}
+    if not config_file_directory or not os.path.isdir(config_file_directory):
+        module_logger.warning(f"Config file directory '{config_file_directory}' is invalid or does not exist for project '{project_name_user_given}'.")
+        return {}
+
+    project_name_id_for_file = generate_project_id(project_name_user_given)
+    config_filename = PROJECT_CONFIG_FILE_TEMPLATE.format(project_name_id=project_name_id_for_file)
+    config_path = os.path.join(config_file_directory, config_filename)
+
     try:
         with open(config_path, 'r') as f:
             project_config = yaml.safe_load(f)
+        if project_config:
+            project_config.setdefault('project_name', project_name_user_given)
+            project_config.setdefault('project_config_file_directory', config_file_directory)
+            project_config.setdefault('project_id_for_filename', project_name_id_for_file)
         return project_config if project_config else {}
     except FileNotFoundError:
-        # This is expected if a project config hasn't been created yet
+        module_logger.info(f"Project configuration file not found at {config_path}")
         return {}
     except yaml.YAMLError as e:
-        st.error(f"Error loading project configuration from '{config_path}': {e}")
+        st.error(f"Error parsing project configuration from '{config_path}': {e}")
         return {}
     except Exception as e:
         st.error(f"An unexpected error occurred while loading project config '{config_path}': {e}")
         return {}
 
-
-def save_project_config(project_folder_path, project_name, project_config_data):
-    """
-    Saves project-specific configuration directly into the project's folder.
-    project_folder_path: The actual path to the project's dedicated folder (e.g., 'data/my_project_data')
-    """
-    if not project_name:
-        st.error("Project name cannot be empty when saving project configuration.")
+def save_project_config(config_file_directory, project_name_user_given, project_config_data):
+    if not project_name_user_given:
+        st.error("Project name (user-given) cannot be empty when saving project configuration.")
         return False
-    if not os.path.exists(project_folder_path):
-        try:
-            os.makedirs(project_folder_path, exist_ok=True)
-        except OSError as e:
-            st.error(f"Could not create project directory '{project_folder_path}': {e}")
-            return False
+    if not config_file_directory or not os.path.isabs(config_file_directory):
+        st.error(f"Configuration file directory must be an absolute path: '{config_file_directory}'")
+        return False
 
-    config_filename = PROJECT_CONFIG_FILE_TEMPLATE.format(project_name=project_name)
-    config_path = os.path.join(project_folder_path, config_filename)
+    try:
+        if not os.path.exists(config_file_directory):
+            os.makedirs(config_file_directory, exist_ok=True)
+            module_logger.info(f"Created directory for project configuration: {config_file_directory}")
+    except OSError as e:
+        st.error(f"Could not create directory '{config_file_directory}' for project configuration: {e}")
+        return False
+
+    project_config_data['project_name'] = project_name_user_given
+    project_config_data['project_config_file_directory'] = config_file_directory
+    project_name_id_for_file = generate_project_id(project_name_user_given)
+    project_config_data['project_id_for_filename'] = project_name_id_for_file
+
+    config_filename = PROJECT_CONFIG_FILE_TEMPLATE.format(project_name_id=project_name_id_for_file)
+    config_path = os.path.join(config_file_directory, config_filename)
 
     try:
         with open(config_path, 'w') as f:
-            yaml.dump(project_config_data, f, default_flow_style=False)
-        # logger.info(f"Project configuration saved to {config_path}") # Use logger if available
+            yaml.dump(project_config_data, f, default_flow_style=False, sort_keys=False)
         return True
     except IOError as e:
         st.error(f"Error saving project configuration to '{config_path}': {e}")
@@ -86,49 +134,13 @@ def save_project_config(project_folder_path, project_name, project_config_data):
         st.error(f"An unexpected error occurred while saving project config to '{config_path}': {e}")
         return False
 
-# --- Logging ---
-def setup_logger(name):
-    """Sets up a basic logger."""
-    logger = logging.getLogger(name)
-    # Prevent adding multiple handlers if logger is already configured
-    if not logger.handlers:
-        logger.setLevel(logging.INFO)
-        handler = logging.StreamHandler() # Outputs to console/Streamlit log
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-    return logger
+class AppError(Exception): pass
 
-# Initialize a logger for this module (optional, but good practice)
-# module_logger = setup_logger(__name__)
-
-# --- Error Handling ---
-class AppError(Exception):
-    """Custom exception class for application-specific errors."""
-    pass
-
-def handle_exception(e, context="", logger_instance=None):
-    """Handles and logs exceptions, displays error in Streamlit."""
+def handle_exception(e, context="General Error", logger_instance=None):
     error_message = f"An error occurred: {context} - {str(e)}"
-    if logger_instance:
-        logger_instance.error(error_message)
-    else:
-        # Fallback if no specific logger passed
-        fallback_logger = setup_logger("general_exception_handler")
-        fallback_logger.error(error_message)
-    st.error(error_message)
-
-# --- Other Utilities ---
-def generate_project_id(project_name):
-    """
-    Generates a simple, filesystem-friendly project ID from the project name.
-    Example: "My Awesome Project!" -> "my_awesome_project"
-    """
-    if not project_name:
-        return ""
-    # Remove special characters, replace spaces with underscores, and lowercase
-    # Allow alphanumeric and underscores
-    project_id = "".join(c if c.isalnum() else "_" for c in project_name.lower())
-    # Replace multiple underscores with a single one
-    project_id = "_".join(filter(None, project_id.split("_")))
-    return project_id
+    log_target = logger_instance if logger_instance else module_logger
+    log_target.error(error_message, exc_info=True)
+    try:
+        if st._is_running_with_streamlit: # Check if Streamlit context is available
+            st.error(error_message)
+    except Exception: pass
