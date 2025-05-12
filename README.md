@@ -69,7 +69,6 @@ This Streamlit application is designed to assist qualitative researchers in perf
 *   Access to a Reddit account.
 *   API keys for Reddit.
 *   API key for either OpenAI or Google Gemini.
-*   (For OneDrive) An Azure AD application registration with the appropriate permissions and Client ID.
 
 ### Installation
 
@@ -94,13 +93,6 @@ This Streamlit application is designed to assist qualitative researchers in perf
     Navigate to the project's root directory (where `requirements.txt` is located) and run:
     ```bash
     pip install -r requirements.txt
-    ```
-
-4.  **Configure OneDrive Client ID (if using OneDrive):**
-    *   Open the file `modules/auth.py`.
-    *   Find the line: `ONEDRIVE_CLIENT_ID = "YOUR_ACTUAL_ONEDRIVE_APP_CLIENT_ID"`
-    *   Replace `"YOUR_ACTUAL_ONEDRIVE_APP_CLIENT_ID"` with the actual "Application (client) ID" from your Azure app registration. Save the file.
-    *   For details on Azure app registration, see "Setting up OneDrive Integration" below.
 
 ### Running the Application
 
