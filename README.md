@@ -1,4 +1,4 @@
-# Qualitative Thematic Analysis Tool for Reddit Data
+# Themely: A Qualitative Thematic Analysis Tool for Reddit Data
 
 This Streamlit application is designed to assist qualitative researchers in performing thematic analysis on Reddit data. It allows users to authenticate with Reddit, download posts based on specific queries, and then leverage generative AI (OpenAI or Gemini) to generate codes, identify patterns, and derive themes from the text data.
 
