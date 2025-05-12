@@ -307,7 +307,7 @@ st.sidebar.divider()
 page_definitions = [
     st.Page(project_setup_page_content, title="Project Setup", icon="🏠", default=True),
     st.Page("pages/data_management_page.py", title="Data Management", icon="💾"),
-    st.Page("pages/ai_coding_page.py", title="AI Coding", icon="🤖"),
+    st.Page("pages/ai_coding_page.py", title="Coding", icon="🤖"),
     st.Page("pages/analysis_page.py", title="Analysis", icon="📊"),
 ]
 pg = st.navigation(page_definitions)

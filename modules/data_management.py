@@ -24,6 +24,9 @@ def get_presidio_anonymizer_instance():
 
 DOWNLOADS_SUBFOLDER = "reddit_downloads"
 VIEWS_SUBFOLDER = "project_views"
+CODEBOOK_SUBFOLDER = "codes" # New constant for codebook
+CODEBOOK_FILENAME = "project_codebook.csv" # New constant for codebook filename
+CODEBOOK_COLUMNS = ["Code Name", "Description", "Rationale", "Example_ids"] # New constant
 
 def save_downloaded_reddit_data(df, subreddit_name, query_str, fetch_params, timestamp):
     project_path = st.session_state.project_path
@@ -106,7 +109,6 @@ def save_project_view(df_view, view_name, source_filenames_info=None):
             "source_files_info": source_filenames_info if source_filenames_info else "Not specified"
         }
         with open(view_filepath_meta, 'w') as f_meta: json.dump(view_metadata, f_meta, indent=4)
-        # ui_helpers.show_success_message(f"View '{view_name}' saved successfully.") # Message moved to app.py
         logger.info(f"View '{view_name}' (CSV and Meta) saved to {views_dir}")
         return True
     except Exception as e:
@@ -146,22 +148,14 @@ def save_coded_data_to_view(df_coded_view, view_csv_filepath):
         ui_helpers.show_error_message(f"Error saving coded data to view '{view_csv_filepath}': {e}")
         return False
 
-# --- Data Redaction (Modifies DataFrame in place) ---
 def redact_text_column_in_place(df_to_modify, column_name):
-    """
-    Redacts sensitive information directly in the specified text column of the DataFrame.
-    This is a destructive operation on the passed DataFrame.
-    Returns the number of PII items found and processed.
-    """
     analyzer = get_presidio_analyzer_instance()
     anonymizer = get_presidio_anonymizer_instance()
-
     if column_name not in df_to_modify.columns:
         ui_helpers.show_error_message(f"Column '{column_name}' not found in data for redaction.")
-        return 0 # Return 0 redactions
-
+        return 0
     total_redactions_found = 0
-    operators = { # Define your redaction operators
+    operators = {
         "DEFAULT": OperatorConfig("replace", {"new_value": "<REDACTED>"}),
         "PHONE_NUMBER": OperatorConfig("mask", {"type": "mask", "masking_char": "*", "chars_to_mask": 12, "from_end": False}),
         "CREDIT_CARD": OperatorConfig("replace", {"new_value": "<CREDIT_CARD>"}),
@@ -169,47 +163,88 @@ def redact_text_column_in_place(df_to_modify, column_name):
         "PERSON": OperatorConfig("replace", {"new_value": "<PERSON>"}),
         "LOCATION": OperatorConfig("replace", {"new_value": "<LOCATION>"}),
     }
-
-    # Create a list of texts to be redacted
     texts_to_redact = df_to_modify[column_name].astype(str).tolist()
     redacted_texts_list = []
-
     progress_bar = st.progress(0, text=f"Redacting data in column '{column_name}'...")
     num_rows = len(texts_to_redact)
-
     for i, text_content in enumerate(texts_to_redact):
         if pd.isna(text_content) or not str(text_content).strip():
-            redacted_texts_list.append(text_content) # Keep NaN or empty as is
+            redacted_texts_list.append(text_content)
         else:
             try:
                 analyzer_results = analyzer.analyze(text=text_content, language='en')
-                anonymized_result = anonymizer.anonymize(
-                    text=text_content,
-                    analyzer_results=analyzer_results,
-                    operators=operators
-                )
+                anonymized_result = anonymizer.anonymize(text=text_content, analyzer_results=analyzer_results, operators=operators)
                 redacted_texts_list.append(anonymized_result.text)
-                if len(analyzer_results) > 0:
-                    total_redactions_found += len(analyzer_results)
+                if len(analyzer_results) > 0: total_redactions_found += len(analyzer_results)
             except Exception as e:
                 logger.error(f"Error during redaction of row {i} for column '{column_name}': {e}")
-                redacted_texts_list.append(text_content) # Keep original text on error for that row
-        
-        if num_rows > 0:
-            progress_bar.progress((i + 1) / num_rows, text=f"Processing row {i+1}/{num_rows} for redaction...")
-
+                redacted_texts_list.append(text_content)
+        if num_rows > 0: progress_bar.progress((i + 1) / num_rows, text=f"Processing row {i+1}/{num_rows} for redaction...")
     progress_bar.empty()
-    
-    # Update the column in the original DataFrame directly
     df_to_modify[column_name] = redacted_texts_list
-    
     return total_redactions_found
 
+# --- Codebook Functions ---
+def get_codebook_filepath(project_path):
+    """Helper to get the full path to the codebook CSV file."""
+    if not project_path: return None
+    codebook_dir = os.path.join(project_path, CODEBOOK_SUBFOLDER)
+    return os.path.join(codebook_dir, CODEBOOK_FILENAME)
 
-# --- Legacy functions (kept for compatibility if needed, but new flows should use specific ones) ---
+def load_codebook(project_path):
+    """Loads the project codebook from its CSV file."""
+    codebook_filepath = get_codebook_filepath(project_path)
+    if not codebook_filepath:
+        logger.error("Project path not available, cannot load codebook.")
+        return pd.DataFrame(columns=CODEBOOK_COLUMNS)
+        
+    if os.path.exists(codebook_filepath):
+        try:
+            df = pd.read_csv(codebook_filepath)
+            # Ensure all necessary columns exist, even if CSV was manipulated
+            for col in CODEBOOK_COLUMNS:
+                if col not in df.columns:
+                    df[col] = "" if col != "Example_ids" else "" # Default for Example_ids as string
+            # Ensure Example_ids is string
+            if 'Example_ids' in df.columns:
+                 df['Example_ids'] = df['Example_ids'].astype(str).fillna('')
+            logger.info(f"Codebook loaded from {codebook_filepath}")
+            return df[CODEBOOK_COLUMNS] # Return in defined order
+        except Exception as e:
+            logger.error(f"Error loading codebook from '{codebook_filepath}': {e}")
+            ui_helpers.show_error_message(f"Could not load codebook: {e}. A new one will be started.")
+            return pd.DataFrame(columns=CODEBOOK_COLUMNS)
+    else:
+        logger.info("No existing codebook file found. Starting a new one.")
+        return pd.DataFrame(columns=CODEBOOK_COLUMNS)
+
+def save_codebook(df_codebook, project_path):
+    """Saves the project codebook to its CSV file."""
+    codebook_filepath = get_codebook_filepath(project_path)
+    if not codebook_filepath:
+        ui_helpers.show_error_message("Project path not set. Cannot save codebook.")
+        return False
+
+    codebook_dir = os.path.dirname(codebook_filepath)
+    try:
+        os.makedirs(codebook_dir, exist_ok=True)
+        # Ensure Example_ids is string before saving
+        df_to_save = df_codebook.copy()
+        if 'Example_ids' in df_to_save.columns:
+            df_to_save['Example_ids'] = df_to_save['Example_ids'].astype(str).fillna('')
+
+        df_to_save.to_csv(codebook_filepath, index=False)
+        logger.info(f"Codebook saved to {codebook_filepath}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving codebook to '{codebook_filepath}': {e}")
+        ui_helpers.show_error_message(f"Error saving codebook: {e}")
+        return False
+
+# --- Legacy functions ---
 def save_data_to_project(df, data_filename="generic_data.csv"):
     project_path = st.session_state.project_path
-    if not project_path: return False # Simplified error handling for generic func
+    if not project_path: return False
     file_path = os.path.join(project_path, data_filename)
     try: df.to_csv(file_path, index=False); return True
     except Exception: return False

@@ -8,6 +8,16 @@ import json
 
 logger = utils.setup_logger("p03_analysis")
 
+# Dialog for inspecting code details
+@st.dialog("Code Details", width="large")
+def show_code_details_dialog():
+    code = st.session_state.inspected_code
+    df_all = st.session_state.analysis_table_df.copy()
+    details_df = df_all[df_all['Codes'].apply(lambda s: code in robust_comma_string_to_list_analysis(s))]
+    st.dataframe(details_df, use_container_width=True)
+    if st.button("Close"):
+        st.rerun()
+
 # --- Initialize Session State Variables for this Page ---
 if 'selected_analysis_views_info' not in st.session_state:
     st.session_state.selected_analysis_views_info = {}
@@ -196,7 +206,9 @@ if not analysis_df_master.empty:
         if 'groups' in displayed_analysis_df_view.columns:
             try: displayed_analysis_df_view = displayed_analysis_df_view[displayed_analysis_df_view['groups'].apply(lambda x: group_to_filter in robust_comma_string_to_list_analysis(x))]
             except Exception as e: logger.error(f"Error filtering by group: {e}"); st.error("Could not apply group filter.")
-    st.dataframe(displayed_analysis_df_view, height=350, use_container_width=True, key="analysis_table_display_key_main")
+    # Calculate dynamic table width to allow horizontal scrolling
+    table_width = min(displayed_analysis_df_view.shape[1] * 200, 2000)
+    st.dataframe(displayed_analysis_df_view, height=350, width=table_width, key="analysis_table_display_key_main")
     col_spacer_save_analysis, col_save_analysis_button = st.columns([0.8, 0.2])
     with col_save_analysis_button:
         if st.button("Save Analysis Data", key="save_analysis_data_btn_main", use_container_width=True):
@@ -306,23 +318,51 @@ if not analysis_df_master.empty:
             
             if current_selection_context == "Uncategorised Codes":
                 if st.session_state.manual_edit_uncategorised_action_radio == "Create New Group":
-                    with st.form("col2_create_new_group_form"):
-                        # Order: Group Name, then Search, then Checkboxes
-                        st.session_state.manual_edit_new_group_name_input = st.text_input("New Group Name:", value=st.session_state.manual_edit_new_group_name_input, key="col2_new_group_name")
-                        st.session_state.manual_edit_code_search_input = st.text_input("Search uncategorised codes:", value=st.session_state.manual_edit_code_search_input, key="col2_search_uncat_for_new")
-                        
-                        codes_to_display_checkboxes = [c for c in uncategorised_codes_list if st.session_state.manual_edit_code_search_input.lower() in c.lower()] if st.session_state.manual_edit_code_search_input else uncategorised_codes_list
-                        st.caption("Select uncategorised codes for this new group:")
-                        current_form_checkbox_selections = {} 
-                        with st.container(height=150):
-                            for code in codes_to_display_checkboxes: 
-                                current_form_checkbox_selections[code] = st.checkbox(code, value=st.session_state.manual_edit_codes_checkboxes_state.get(code,False), key=f"form_cb_uncat_new_{utils.generate_project_id(code)}_col2")
-                        if st.form_submit_button("Create Group"):
-                            new_g_name = st.session_state.manual_edit_new_group_name_input.strip(); selected_c = [c for c,chk in current_form_checkbox_selections.items() if chk] 
-                            if not new_g_name: ui_helpers.show_error_message("Name empty.")
-                            elif not selected_c: ui_helpers.show_error_message("Select codes.")
-                            elif new_g_name in st.session_state.created_code_groups: ui_helpers.show_error_message(f"Group '{new_g_name}' exists.")
-                            else: st.session_state.created_code_groups[new_g_name] = selected_c; update_dataframe_groups_column(); ui_helpers.show_success_message(f"Group '{new_g_name}' created."); st.session_state.manual_edit_new_group_name_input = ""; st.session_state.manual_edit_codes_checkboxes_state = {}; st.session_state.manual_edit_selected_group_radio = new_g_name; st.rerun()
+                    # Custom group creation UI to allow Inspect buttons
+                    st.session_state.manual_edit_new_group_name_input = st.text_input(
+                        "New Group Name:",
+                        value=st.session_state.manual_edit_new_group_name_input,
+                        key="col2_new_group_name"
+                    )
+                    st.session_state.manual_edit_code_search_input = st.text_input(
+                        "Search uncategorised codes:",
+                        value=st.session_state.manual_edit_code_search_input,
+                        key="col2_search_uncat_for_new"
+                    )
+                    codes_to_display_checkboxes = [c for c in uncategorised_codes_list if st.session_state.manual_edit_code_search_input.lower() in c.lower()] if st.session_state.manual_edit_code_search_input else uncategorised_codes_list
+                    st.caption("Select uncategorised codes for this new group:")
+                    # Collect selected codes and provide Inspect buttons
+                    selected_codes = []
+                    with st.container(height=300):
+                        for code in codes_to_display_checkboxes:
+                            col_cb, col_btn = st.columns([0.75, 0.25])
+                            checked = col_cb.checkbox(
+                                code,
+                                value=st.session_state.manual_edit_codes_checkboxes_state.get(code, False),
+                                key=f"cb_new_{utils.generate_project_id(code)}"
+                            )
+                            if checked:
+                                selected_codes.append(code)
+                            if col_btn.button("Inspect", key=f"inspect_{utils.generate_project_id(code)}"):
+                                st.session_state.inspected_code = code
+                                show_code_details_dialog()
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    # Finalize group creation
+                    if st.button("Create Group"):
+                        new_g_name = st.session_state.manual_edit_new_group_name_input.strip()
+                        if not new_g_name:
+                            ui_helpers.show_error_message("Name empty.")
+                        elif not selected_codes:
+                            ui_helpers.show_error_message("Select codes.")
+                        elif new_g_name in st.session_state.created_code_groups:
+                            ui_helpers.show_error_message(f"Group '{new_g_name}' exists.")
+                        else:
+                            st.session_state.created_code_groups[new_g_name] = selected_codes.copy()
+                            update_dataframe_groups_column()
+                            ui_helpers.show_success_message(f"Group '{new_g_name}' created.")
+                            st.session_state.manual_edit_new_group_name_input = ""
+                            st.session_state.manual_edit_codes_checkboxes_state = {}
+                            st.rerun()
                 
                 elif st.session_state.manual_edit_uncategorised_action_radio == "Add to Existing Group":
                     existing_g_names = sorted(list(st.session_state.created_code_groups.keys()))
@@ -373,7 +413,3 @@ if not analysis_df_master.empty:
             else: st.empty() # Should not be reached if radio state is managed
 else: 
     st.info("Select one or more views to load data for analysis and grouping.")
-
-st.markdown("---")
-st.subheader("Further Visualizations & Analysis Tools")
-st.info("Additional tools like word clouds (of text or codes) and frequency charts for codes/groups can be implemented here.")
