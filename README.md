@@ -160,7 +160,7 @@ To allow the application to fetch data from Reddit, you need to create a "script
 *   `.gitignore`: Specifies intentionally untracked files for Git.
 *   `README.md`: This file.
 *   `modules/`: Contains the core logic:
-    *   `auth.py`: Handles authentication for cloud services and project setup.
+    *   `auth.py`: Handles authentication for API services and project setup.
     *   `reddit_api.py`: Manages Reddit API requests and data retrieval.
     *   `ai_services.py`: Manages interactions with OpenAI and Google Gemini APIs.
     *   `data_management.py`: Handles data storage (local CSVs), redaction (Presidio), and view management.
@@ -172,7 +172,6 @@ To allow the application to fetch data from Reddit, you need to create a "script
         *   `reddit_data.csv`: Raw data fetched from Reddit.
         *   `processed_data.csv`: Data after redaction, with AI codes, etc.
         *   `views/`: Subfolder for saved filtered data views.
-    *   `project_configs_for_cloud_storage/`: (Created by the app) Stores local YAML config files for projects designated for cloud storage.
 
 ## Contributing
 
