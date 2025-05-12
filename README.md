@@ -2,14 +2,12 @@
 
 This Streamlit application is designed to assist qualitative researchers in performing thematic analysis on Reddit data. It allows users to authenticate with Reddit, download posts based on specific queries, and then leverage generative AI (OpenAI or Gemini) to generate codes, identify patterns, and derive themes from the text data.
 
+
+**Development note:** This application was predominantly created with the assistance of AI code‑generation tools such as Google AI Studio and ChatGPT, as part of an experiment to evaluate the practical potential of these emerging technologies in real‑world research workflows.
+
 ## Features
 
 *   **Project-Based Workflow:** Organize your analysis into distinct projects.
-*   **Flexible Data Storage:**
-    *   **Local Storage:** Choose any folder on your computer to store project data and configurations.
-    *   **Cloud Storage (Conceptual for Data, Local for Config):**
-        *   **OneDrive:** Functional authentication using Device Flow. (Data storage/retrieval from OneDrive would require further Microsoft Graph API integration).
-        *   **Google Drive/Dropbox:** Placeholders for potential future integration. Project configuration files for cloud projects are stored locally.
 *   **Reddit Data Retrieval:**
     *   Fetch posts from specified subreddits.
     *   Filter by search queries, sort order, and timeframes.
@@ -19,13 +17,14 @@ This Streamlit application is designed to assist qualitative researchers in perf
     *   **PII Redaction:** Automatically redact sensitive information (like names, emails, phone numbers) using Microsoft Presidio Analyzer, with a new redacted column created.
 *   **AI-Assisted Thematic Coding:**
     *   Choose between OpenAI or Google Gemini for generative AI tasks.
-    *   Generate initial thematic codes based on user-defined prompts.
+    *   **Codebook Generation:** Automatically create a shared codebook (concise set of tags) that captures the main patterns in your dataset.
+    *   **Row‑wise Tagging:** Apply the generated codebook to label every Reddit post (up to 5 tags per item).
     *   View and manage AI-generated codes.
 *   **Filtering and Views:**
     *   Filter data based on assigned codes.
     *   Save and load filtered "views" of your data for focused analysis.
-*   **Clustering and Theme Generation (Conceptual & Simulated):**
-    *   Simulate clustering of data based on codes.
+*   **Clustering and Theme Generation:**
+    *   Group related tags into higher‑level themes using embeddings and/or AI-driven clustering.
     *   Generate AI-driven summaries for (simulated) clusters to help identify overarching themes.
 *   **Visualizations:**
     *   Generate word clouds from text data or AI codes.
@@ -36,11 +35,7 @@ This Streamlit application is designed to assist qualitative researchers in perf
 
 1.  **Setup & Configuration (Tab 1):**
     *   **Create/Load Project:**
-        *   Provide a project name.
-        *   Select storage type:
-            *   **Local:** Enter the absolute path to a parent folder on your computer where the project-specific subfolder will be created.
-            *   **OneDrive:** Authenticate using the Device Flow. Project configuration is stored locally.
-            *   **Google Drive/Dropbox:** Conceptual. Project configuration is stored locally.
+        *   Provide a project name and path.
     *   **API Key Management:**
         *   **Reddit API Credentials:** Obtain and enter your Reddit Client ID, Client Secret, and a unique User Agent.
         *   **Generative AI Keys:** Select your AI provider (OpenAI or Gemini) and enter the corresponding API key.
@@ -51,18 +46,19 @@ This Streamlit application is designed to assist qualitative researchers in perf
     *   **View/Edit Data:** Inspect raw and processed data in interactive tables. Make edits as needed (primarily on "Processed Data").
     *   **Redact Data:** Select a text column in your "Processed Data" for PII redaction using Microsoft Presidio. A new `_redacted` column will be created.
 
-3.  **Coding & View Management (Tab 3):**
-    *   **AI-Assisted Coding:**
-        *   Select the text column (preferably a redacted one) for coding.
-        *   Choose your AI provider and model.
-        *   Customize the AI prompt for code generation.
-        *   Generate codes. An `ai_codes` column will be added to your "Processed Data".
+3.  **Codebook Generation, Tagging & View Management (Tab 3):**
+    *   **AI‑Assisted Codebook & Tagging:**
+        *   Select the text column (preferably a redacted one) for analysis.
+        *   Generate a shared codebook of concise tags (saved as `codebook.json`).
+        *   Apply that codebook to tag each row; the resulting tags are stored in a `tags` column.
+        *   Review and, if necessary, edit tags directly in the table.
+        *   Filter your "Processed Data" based on tags to create focused subsets.
     *   **Filter & Group:** Filter your "Processed Data" based on the generated `ai_codes`.
     *   **Save/Load Views:** Save filtered datasets as named "views" and load them later for focused analysis.
 
 4.  **Analysis & Visualization (Tab 4):**
-    *   **Clustering (Simulated):** Simulate the clustering of data based on codes to group similar items.
-    *   **AI Theme Summaries:** Generate AI-driven summaries for each (simulated) cluster to help understand potential themes.
+    *   **Clustering:** Cluster posts or tags to surface coherent groups automatically.
+    *   **AI Theme Summaries:** Produce concise AI‑generated descriptions for each cluster to articulate overarching themes.
     *   **Visualizations:** Create word clouds (from text or codes) and bar charts of code frequencies.
 
 ## Getting Started
@@ -163,36 +159,6 @@ To allow the application to fetch data from Reddit, you need to create a "script
     *   Create an API key. Copy it.
     *   In Tab 1 of the Streamlit app, select "Gemini", paste your key, and save.
 
-### 3. Setting up OneDrive Integration (Optional)
-
-If you plan to use OneDrive for (conceptual) project storage:
-
-1.  **Register an application in the Azure portal:**
-    *   Go to [Azure App registrations](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade).
-    *   Click "New registration".
-    *   **Name:** E.g., `StreamlitQualitativeAnalysisApp`.
-    *   **Supported account types:** Choose "Accounts in any organizational directory (Any Azure AD directory - Multitenant) and personal Microsoft accounts (e.g. Skype, Xbox)".
-    *   **Redirect URI:** Not needed for device flow; leave blank.
-    *   Click "Register".
-2.  **Get Application (client) ID:**
-    *   On the app's "Overview" page, copy the **Application (client) ID**.
-3.  **Enable public client flows:**
-    *   In your app registration, go to "Authentication".
-    *   Scroll to "Advanced settings".
-    *   Set "Allow public client flows" to **Yes**. Save.
-4.  **API Permissions:**
-    *   Go to "API permissions".
-    *   Click "Add a permission" -> "Microsoft Graph" -> "Delegated permissions".
-    *   Search for and add:
-        *   `Files.ReadWrite.AppFolder` (allows the app to read/write to its own dedicated folder in OneDrive)
-        *   `User.Read` (to read the user's profile)
-        *   `offline_access` (to get refresh tokens for persistent access)
-    *   Click "Add permissions".
-    *   You might need an admin to "Grant admin consent" for these permissions depending on your organization. For personal accounts, you grant consent during the login flow.
-5.  **Update `modules/auth.py`:**
-    *   Open `modules/auth.py` in a text editor.
-    *   Find the line: `ONEDRIVE_CLIENT_ID = "YOUR_ACTUAL_ONEDRIVE_APP_CLIENT_ID"`
-    *   Replace `"YOUR_ACTUAL_ONEDRIVE_APP_CLIENT_ID"` with the Application (client) ID you copied from Azure. Save the file.
 
 ## Project Structure
 
