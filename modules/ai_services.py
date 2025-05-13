@@ -198,89 +198,145 @@ def generate_code_groups_with_ai(unique_codes_list_str, prompt_template, provide
         logger.error(error_msg, exc_info=True)
         return {"error": error_msg}
 
-def generate_codebook_with_ai(data_df, provider_name, prompt_template_codebook, text_column_name, id_column_name, model_name=None, batch_size=None):
-    # Batch processing: if batch_size specified and dataset is larger than batch_size, split into chunks
-    if isinstance(batch_size, int) and batch_size > 0 and len(data_df) > batch_size:
-        from math import ceil
-        all_entries = []
-        num_chunks = ceil(len(data_df) / batch_size)
-        for i in range(num_chunks):
-            start = i * batch_size
-            end = start + batch_size
-            chunk_df = data_df.iloc[start:end]
-            # Recursively process each chunk
-            chunk_entries = generate_codebook_with_ai(
-                chunk_df,
-                provider_name,
-                prompt_template_codebook,
-                text_column_name,
-                id_column_name,
-                model_name,
-                batch_size
+def generate_codebook_with_ai(
+    data_df: pd.DataFrame,
+    provider_name: str,
+    prompt_template_codebook: str,
+    text_column_name: str,
+    id_column_name: str,
+    model_name: str = None,
+    batch_size: int = None,
+    existing_code_names: list = None
+) -> "Union[List[Dict], Dict]":
+    """
+    Generates (or updates) a codebook using the chosen LLM.
+    *Within one run* it processes the dataset in sequential batches and
+    ensures every later batch sees the codes discovered in earlier batches.
+    Parameters
+    ----------
+    data_df : pd.DataFrame
+        Slice of the dataset to analyse.
+    provider_name : {"OpenAI","Gemini"}
+    prompt_template_codebook : str
+        Prompt already contains CURRENT draft codebook JSON + merge rules and
+        placeholders {TEXT_COLUMN_NAME}, {ID_COLUMN_NAME}, {JSON_DATA_BATCH}.
+    text_column_name : str
+    id_column_name   : str
+    model_name       : str, optional
+    batch_size       : int, optional
+    existing_code_names : list[str], optional
+        Used only for final exact‑string dedup at the end.
+    Returns
+    -------
+    list[dict] – new codebook entries produced this run
+    dict       – {"error": "..."} on failure
+    """
+    if existing_code_names is None:
+        existing_code_names = []
+
+    # ---- quick check prompt has placeholders -------------------------
+    required_placeholders = ["{TEXT_COLUMN_NAME}", "{ID_COLUMN_NAME}", "{JSON_DATA_BATCH}"]
+    if not all(ph in prompt_template_codebook for ph in required_placeholders):
+        return {"error": "Prompt template missing required placeholders."}
+
+    # ---- helper: single LLM call -------------------------------------
+    def _call_llm(user_prompt: str):
+        try:
+            if provider_name.lower() == "openai":
+                client = get_ai_client("OpenAI")
+                mdl = model_name or "gpt-4o"
+                resp = client.chat.completions.create(
+                    model=mdl,
+                    messages=[{"role": "user", "content": user_prompt}],
+                    temperature=0.3,
+                    max_tokens=4096,
+                )
+                return resp.choices[0].message.content.strip()
+            elif provider_name.lower() == "gemini":
+                genai = get_ai_client("Gemini")
+                mdl = model_name or "gemini-2.0-flash"
+                res = genai.GenerativeModel(mdl).generate_content(user_prompt)
+                return res.text.strip()
+            else:
+                return None
+        except Exception as e:
+            logger.error(f"LLM call failed: {e}", exc_info=True)
+            return None
+
+    # ---- batching setup ----------------------------------------------
+    if not batch_size or batch_size <= 0:
+        batch_size = len(data_df)
+
+    combined_entries = []
+    seen_names = set(existing_code_names)
+
+    cursor = 0
+    while cursor < len(data_df):
+        chunk_df = data_df.iloc[cursor: cursor + batch_size]
+        cursor += batch_size
+
+        # Build data JSON for this chunk
+        json_data_batch = json.dumps([
+            {
+                id_column_name: str(row[id_column_name]),
+                text_column_name: str(row[text_column_name]) if pd.notna(row[text_column_name]) else ""
+            }
+            for _, row in chunk_df.iterrows()
+        ], ensure_ascii=False)
+
+        # Start from user template
+        chunk_prompt = prompt_template_codebook.replace("{TEXT_COLUMN_NAME}", text_column_name)\
+                                              .replace("{ID_COLUMN_NAME}", id_column_name)\
+                                              .replace("{JSON_DATA_BATCH}", json_data_batch)
+
+        # Prepend growing draft for later chunks
+        if combined_entries:
+            draft_json = json.dumps([
+                {
+                    "Code": ent["Code Name"],
+                    "Description": ent["Description"],
+                    "Rationale": ent["Rationale"],
+                    "Example_ids": ent["Example_ids"],
+                }
+                for ent in combined_entries
+            ], ensure_ascii=False)
+            preamble = (
+                "CURRENT CODEBOOK (Draft)\n"
+                "Merge with these existing codes; do not duplicate.\n\n"
+                f"{draft_json}\n\n"
             )
-            all_entries.extend(chunk_entries)
-        return all_entries
-    client_or_module = get_ai_client(provider_name)
-    if not client_or_module: return {"error": "AI client not initialized for codebook generation."}
-    if not all(p in prompt_template_codebook for p in ["{TEXT_COLUMN_NAME}", "{ID_COLUMN_NAME}", "{JSON_DATA_BATCH}"]):
-        logger.error("Prompt template for AI codebook generation is missing one or more required placeholders.")
-        return {"error": "Invalid AI prompt template for codebook generation."}
-    json_input_list = []
-    for index, row in data_df.iterrows():
-        text_content = str(row[text_column_name]) if pd.notna(row[text_column_name]) else ""
-        item_id = str(row[id_column_name]) if pd.notna(row[id_column_name]) else f"missing_id_{index}"
-        json_input_list.append({id_column_name: item_id, text_column_name: text_content})
-    if not json_input_list:
-        logger.warning("Data for AI codebook generation is empty.")
-        return {"error": "Input data for codebook generation was empty."}
-    json_data_batch_str = json.dumps(json_input_list, indent=2)
-    final_prompt = prompt_template_codebook.replace("{TEXT_COLUMN_NAME}", text_column_name)
-    final_prompt = final_prompt.replace("{ID_COLUMN_NAME}", id_column_name)
-    final_prompt = final_prompt.replace("{JSON_DATA_BATCH}", json_data_batch_str)
-    logger.info(f"Sending data for {len(json_input_list)} items to {provider_name} (model: {model_name or 'default'}) for codebook generation.")
-    ai_response_text_raw = None
-    try:
-        if provider_name == "OpenAI":
-            client = client_or_module
-            selected_model = model_name or "gpt-4o"
-            completion = client.chat.completions.create(model=selected_model, messages=[{"role": "user", "content": final_prompt}], temperature=0.3)
-            ai_response_text_raw = completion.choices[0].message.content.strip()
-        elif provider_name == "Gemini":
-            gemini_module = client_or_module
-            selected_model_gemini = model_name or "gemini-2.0-flash"
-            model_instance_gemini = gemini_module.GenerativeModel(selected_model_gemini, generation_config=genai.types.GenerationConfig(temperature=0.3))
-            response_gemini = model_instance_gemini.generate_content(final_prompt)
-            ai_response_text_raw = response_gemini.text.strip()
-        if not ai_response_text_raw: raise ValueError("AI returned an empty response for codebook generation.")
-        logger.debug(f"AI Raw Response (Codebook Gen) Snippet: {ai_response_text_raw[:500]}...")
-        cleaned_json_string = extract_json_from_ai_response(ai_response_text_raw)
-        if not cleaned_json_string: raise ValueError("Could not extract a valid JSON array from AI response for codebook gen.")
-        logger.debug(f"Cleaned JSON String (Codebook Gen) Snippet for parsing: {cleaned_json_string[:500]}...")
-        parsed_results = json.loads(cleaned_json_string)
-        if not isinstance(parsed_results, list): raise ValueError("AI response for codebook gen, after cleaning, was not a JSON array of code objects.")
-        validated_codebook_entries = []
-        expected_keys = {"Code", "Description", "Rationale", "Example_ids"}
-        for item in parsed_results:
-            if isinstance(item, dict) and expected_keys.issubset(item.keys()):
-                if isinstance(item["Example_ids"], str): item["Example_ids"] = [eid.strip() for eid in item["Example_ids"].split(',') if eid.strip()]
-                elif not isinstance(item["Example_ids"], list): item["Example_ids"] = []
-                item["Code Name"] = item.pop("Code")
-                validated_codebook_entries.append(item)
-            else: logger.warning(f"Skipping malformed codebook object from AI: {item}")
-        if not validated_codebook_entries and parsed_results: raise ValueError("AI response parsed but contained no validly structured codebook objects.")
-        return validated_codebook_entries
-    except json.JSONDecodeError as e:
-        error_msg = f"Failed to decode AI JSON response for codebook gen: {e}. Cleaned: '{cleaned_json_string[:200] if 'cleaned_json_string' in locals() else 'N/A'}'. Raw: '{ai_response_text_raw[:200] if ai_response_text_raw else 'N/A'}'"
-        logger.error(error_msg)
-        return {"error": error_msg}
-    except Exception as e:
-        if "context_length_exceeded" in str(e).lower() or "prompt is too long" in str(e).lower() or "400_error" in str(e).lower() :
-             error_msg = f"The dataset might be too large for a single AI request ({len(json_input_list)} items). Detail: {e}"
-             logger.error(error_msg, exc_info=False)
-        else:
-            error_msg = f"Error during AI codebook generation: {e}"
-            logger.error(error_msg, exc_info=True)
-        return {"error": error_msg}
+            chunk_prompt = preamble + chunk_prompt
+
+        # ---- call the LLM --------------------------------------------
+        raw = _call_llm(chunk_prompt)
+        if raw is None:
+            return {"error": "LLM call failed."}
+
+        cleaned = extract_json_from_ai_response(raw)
+        try:
+            parsed = json.loads(cleaned)
+        except Exception as e:
+            return {"error": f"JSON parse error: {e}"}
+
+        if not isinstance(parsed, list):
+            return {"error": "LLM did not return a JSON array."}
+
+        # ---- validate & merge ----------------------------------------
+        for obj in parsed:
+            if not isinstance(obj, dict):
+                continue
+            if {"Code", "Description", "Rationale", "Example_ids"} <= obj.keys():
+                obj["Code Name"] = obj.pop("Code")
+                if obj["Code Name"] in seen_names:
+                    continue
+                if isinstance(obj["Example_ids"], str):
+                    obj["Example_ids"] = [s.strip() for s in obj["Example_ids"].split(",") if s.strip()]
+                elif not isinstance(obj["Example_ids"], list):
+                    obj["Example_ids"] = []
+                combined_entries.append(obj)
+                seen_names.add(obj["Code Name"])
+
+    return combined_entries
 
 def generate_codes_with_codebook(provider_name, filled_prompt, id_column_name, model_name=None, batch_size=None):
     """
