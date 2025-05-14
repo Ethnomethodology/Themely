@@ -1,9 +1,10 @@
-# pages/ai_coding_page.py
+# pages/codebook.py
+# Persist global theme and layout on this page
 import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
-from modules import data_management, ui_helpers, utils, ai_services
+from modules import data_manager, ui_helpers, utils, ai_services
 import math # For sqrt in codebook generation prompt info
 import json
 import numpy as np
@@ -163,7 +164,7 @@ def update_codes_dialog():
             df_to_save = st.session_state.data_for_coding_tab3.copy()
             if "Source View" in df_to_save.columns:
                 df_to_save = df_to_save.drop(columns=["Source View"], errors="ignore")
-            success = data_management.save_coded_data_to_view(df_to_save, selected_paths[0])
+            success = data_manager.save_coded_data_to_view(df_to_save, selected_paths[0])
             if success:
                 ui_helpers.show_success_message(f"Codes updated in '{os.path.basename(selected_paths[0])}'.")
             else:
@@ -306,7 +307,7 @@ INPUT DATA
                     df_save = st.session_state.data_for_coding_tab3.copy()
                     if "Source View" in df_save.columns:
                         df_save = df_save.drop(columns=["Source View"], errors="ignore")
-                    data_management.save_coded_data_to_view(df_save, paths[0])
+                    data_manager.save_coded_data_to_view(df_save, paths[0])
             except Exception as merge_err:
                 logger.warning(f"Error merging AI response codes: {merge_err}")
         # Store response and trigger results dialog
@@ -421,9 +422,9 @@ def ai_codebook_generation_modal():
                 new_df = new_df.rename(columns={'Code': 'Code Name'})
             # Assign a unique code_id to each new code entry
             new_df['code_id'] = [str(uuid.uuid4()) for _ in range(len(new_df))]
-            for col in data_management.CODEBOOK_COLUMNS:
+            for col in data_manager.CODEBOOK_COLUMNS:
                 if col not in new_df.columns: new_df[col] = ""
-            new_df = new_df[data_management.CODEBOOK_COLUMNS]
+            new_df = new_df[data_manager.CODEBOOK_COLUMNS]
             new_df['Example_ids'] = new_df['Example_ids'].apply(lambda x: ', '.join(map(str, x)) if isinstance(x, list) else (str(x) if pd.notna(x) else ''))
             new_df.insert(0, 'Select', False)
             # Append to draft
@@ -467,7 +468,7 @@ def manual_codebook_entry_modal():
                     'Example_ids': ex_ids.strip()
                 }])
                 if st.session_state.edited_codebook_df.empty:
-                    st.session_state.edited_codebook_df = pd.DataFrame(columns=['Select'] + data_management.CODEBOOK_COLUMNS)
+                    st.session_state.edited_codebook_df = pd.DataFrame(columns=['Select'] + data_manager.CODEBOOK_COLUMNS)
                 st.session_state.edited_codebook_df = pd.concat([st.session_state.edited_codebook_df, new_entry], ignore_index=True)
                 ui_helpers.show_success_message(f"Entry '{name.strip()}' added to draft.")
                 st.rerun()
@@ -592,9 +593,9 @@ The input data batch you need to process is below:
 {json_data_batch}"""
 
 if 'current_codebook_df' not in st.session_state:
-    st.session_state.current_codebook_df = pd.DataFrame(columns=data_management.CODEBOOK_COLUMNS)
+    st.session_state.current_codebook_df = pd.DataFrame(columns=data_manager.CODEBOOK_COLUMNS)
 if 'edited_codebook_df' not in st.session_state: # This DF will now also include the "Select" column for the editor
-    st.session_state.edited_codebook_df = pd.DataFrame(columns=["Select"] + data_management.CODEBOOK_COLUMNS)
+    st.session_state.edited_codebook_df = pd.DataFrame(columns=["Select"] + data_manager.CODEBOOK_COLUMNS)
 if 'newly_added_code_names_codebook' not in st.session_state:
     st.session_state.newly_added_code_names_codebook = []
 if 'ai_codebook_text_col' not in st.session_state: st.session_state.ai_codebook_text_col = None
@@ -640,7 +641,7 @@ if "inspect_dialog_example_ids_str_combined" not in st.session_state: st.session
 if "inspect_dialog_id_column" not in st.session_state: st.session_state.inspect_dialog_id_column = None
 
 
-st.title("Coding & Codebook Development")
+st.title("Codebook")
 
 if not st.session_state.get('current_project_name') or not st.session_state.get('project_path'):
     st.warning("👈 Please create or open a project first from the '🏠 Project Setup' page.")
@@ -649,7 +650,7 @@ if not st.session_state.get('current_project_name') or not st.session_state.get(
 if st.session_state.current_project_name and st.session_state.project_path:
     if 'codebook_loaded_for_project' not in st.session_state or \
        st.session_state.codebook_loaded_for_project != st.session_state.current_project_name:
-        loaded_cb_df = data_management.load_codebook(st.session_state.project_path)
+        loaded_cb_df = data_manager.load_codebook(st.session_state.project_path)
         # Add "Select" column to the loaded codebook for editor state management
         loaded_cb_df.insert(0, "Select", False)
         st.session_state.current_codebook_df = loaded_cb_df.copy() # Includes "Select"
@@ -766,7 +767,7 @@ def load_and_combine_selected_views_for_coding_p02():
     for view_info in selected_view_infos:
         csv_path = view_info["metadata"].get("csv_filepath")
         if csv_path and os.path.exists(csv_path):
-            df_single_view = data_management.load_data_from_specific_file(csv_path)
+            df_single_view = data_manager.load_data_from_specific_file(csv_path)
             if df_single_view is not None:
                 df_single_view["Source View"] = view_info["metadata"].get("view_name", os.path.basename(csv_path))
                 combined_df_list_views.append(df_single_view)
@@ -790,7 +791,7 @@ def load_and_combine_selected_views_for_coding_p02():
         st.session_state.data_for_row_wise_coding_actions = pd.DataFrame()
 
 st.subheader("1. Select Project View(s) for Coding")
-available_views_meta_p02 = data_management.list_created_views_metadata()
+available_views_meta_p02 = data_manager.list_created_views_metadata()
 if not available_views_meta_p02:
     st.info("No project views created yet. Go to '💾 Data Management' page to create a view.")
 else:
@@ -879,7 +880,7 @@ else:
                 df_to_save = st.session_state.data_for_coding_tab3.copy()
                 if "Source View" in df_to_save.columns:
                     df_to_save = df_to_save.drop(columns=["Source View"], errors="ignore")
-                success = data_management.save_coded_data_to_view(df_to_save, selected_paths[0])
+                success = data_manager.save_coded_data_to_view(df_to_save, selected_paths[0])
                 if success:
                     ui_helpers.show_success_message(f"All codes deleted in '{os.path.basename(selected_paths[0])}'.")
                 else:
@@ -996,7 +997,7 @@ if col_delete.button("Delete Selected", key="delete_selected_from_draft_btn"):
         if names_in_file:
             new_original_df = original_cb_df[~original_cb_df["Code Name"].isin(names_in_file)].copy()
             df_to_save = new_original_df.drop(columns=["Select"], errors="ignore").reset_index(drop=True)
-            success = data_management.save_codebook(df_to_save, st.session_state.project_path)
+            success = data_manager.save_codebook(df_to_save, st.session_state.project_path)
             if success:
                 ui_helpers.show_success_message(f"Deleted {len(names_in_file)} entries from the saved codebook file.")
                 # Reset Select column to False for the updated codebook
@@ -1010,7 +1011,7 @@ if col_delete.button("Delete Selected", key="delete_selected_from_draft_btn"):
 
 # Discard Changes
 if col_discard.button("Discard Changes", key="discard_codebook_changes_main"):
-    loaded_cb_df_discard = data_management.load_codebook(st.session_state.project_path)
+    loaded_cb_df_discard = data_manager.load_codebook(st.session_state.project_path)
     loaded_cb_df_discard.insert(0, "Select", False)
     st.session_state.current_codebook_df = loaded_cb_df_discard.copy()
     st.session_state.edited_codebook_df = loaded_cb_df_discard.copy()
@@ -1021,7 +1022,7 @@ if col_discard.button("Discard Changes", key="discard_codebook_changes_main"):
 # Save Changes
 if col_save.button("Save Changes", key="accept_codebook_changes_main"):
     df_to_save_codebook = st.session_state.edited_codebook_df.drop(columns=["Select"], errors="ignore").reset_index(drop=True)
-    if data_management.save_codebook(df_to_save_codebook, st.session_state.project_path):
+    if data_manager.save_codebook(df_to_save_codebook, st.session_state.project_path):
         loaded_cb_for_edit = df_to_save_codebook.copy()
         loaded_cb_for_edit.insert(0, "Select", False)
         st.session_state.current_codebook_df = loaded_cb_for_edit.copy()
@@ -1063,7 +1064,7 @@ if col_apply.button("Apply Code", key="add_code_section3_btn",
         df_to_save = df_to_update.copy()
         if 'Source View' in df_to_save.columns:
             df_to_save = df_to_save.drop(columns=['Source View'], errors='ignore')
-        success = data_management.save_coded_data_to_view(df_to_save, selected_paths[0])
+        success = data_manager.save_coded_data_to_view(df_to_save, selected_paths[0])
         if success:
             ui_helpers.show_success_message(f"Codes saved to '{os.path.basename(selected_paths[0])}'.")
         else:

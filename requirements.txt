@@ -5,22 +5,9 @@ openai
 google-generativeai
 presidio-analyzer
 presidio-anonymizer
-google-auth
-# For Microsoft OneDrive/Graph API authentication
-msal
-# msal-extensions can be useful for persistent, cross-platform token caching,
-# but for simplicity in this example, we'll use MSAL's in-memory cache
-# or rely on MSAL's basic SerializableTokenCache for project config storage.
-# If you want more robust caching:
-# msal-extensions
-
-# For full Google OAuth flows (like Google Drive in auth.py placeholders), you'd typically use:
-# google-auth-oauthlib
-# google-api-python-client
-dropbox # For Dropbox placeholder
 PyYAML
 matplotlib
 wordcloud
-
+sentence-transformers[onnx]
 # Optional, if you directly use requests with Graph API after getting token
 # requests

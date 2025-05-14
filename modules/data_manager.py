@@ -1,4 +1,4 @@
-# modules/data_management.py
+# modules/data_manager.py
 import streamlit as st
 import pandas as pd
 from presidio_analyzer import AnalyzerEngine

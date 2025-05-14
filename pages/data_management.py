@@ -1,11 +1,18 @@
-# pages/data_management_page.py
+# pages/data_management.py
 import streamlit as st
+# Persist global theme and layout on this page
 import pandas as pd
 import os
 from datetime import datetime
-from modules import data_management, ui_helpers, utils, reddit_api # Ensure all needed modules are imported
+from modules import data_manager, ui_helpers, utils, reddit_api # Ensure all needed modules are imported
 
 logger = utils.setup_logger("p01_data_management")
+ui_helpers.page_sidebar_info([
+    "Configure your Reddit API Query",
+    "Download the Data",
+    "Combine Multiple Datasets",
+    "Create a view of combined Dataset for further analysis."
+])
 
 # Helper function (could be moved to a shared utility if used by other pages too)
 def load_and_combine_selected_downloads_for_view_p1(): # Renamed for page specificity
@@ -18,7 +25,7 @@ def load_and_combine_selected_downloads_for_view_p1(): # Renamed for page specif
         st.session_state.combined_data_for_view_creation = pd.DataFrame()
         return
     for file_info in selected_file_infos:
-        df_single = data_management.load_data_from_specific_file(file_info["filepath"])
+        df_single = data_manager.load_data_from_specific_file(file_info["filepath"])
         if df_single is not None:
             df_single["Source File"] = os.path.basename(file_info["filepath"])
             combined_df_list.append(df_single)
@@ -33,7 +40,7 @@ def load_and_combine_selected_downloads_for_view_p1(): # Renamed for page specif
     else: st.session_state.combined_data_for_view_creation = pd.DataFrame()
 
 
-st.title("Data Management & View Creation")
+st.title("Data Management")
 
 if not st.session_state.get('current_project_name'):
     st.warning("👈 Please create or open a project first from the 'Project Setup' page.")
@@ -42,8 +49,8 @@ if not st.session_state.get('current_project_name'):
 # ... (Rest of the content from your previous `pages/1_💾_Data_Management.py` or Tab 2) ...
 # Ensure all widget keys are unique for this page (e.g., suffixed with _p01 or _data_mgmt)
 # Call load_and_combine_selected_downloads_for_view_p1() when selections change.
-st.subheader("Fetch New Reddit Data")
-with st.expander("Show Fetch Options", expanded=True):
+st.subheader("Download Reddit Data")
+with st.expander("Download Options", expanded=True):
     with st.form("reddit_query_form_p01_nav"): 
         fetch_subreddit_p01 = st.text_input("Subreddit Name", help="e.g., 'learnpython'")
         fetch_query_p01 = st.text_input("Search Query/Keywords (optional)")
@@ -62,7 +69,7 @@ with st.expander("Show Fetch Options", expanded=True):
                 if fetched_df_p01 is not None and not fetched_df_p01.empty:
                     current_ts_fetch_p01 = datetime.now()
                     fetch_params_meta_p01 = {"subreddit": fetch_subreddit_p01, "query": fetch_query_p01, "limit": fetch_limit_p01, "sort": fetch_sort_p01, "time_filter": fetch_time_filter_p01, "timestamp": current_ts_fetch_p01.isoformat()}
-                    saved_filepath_fetch_p01 = data_management.save_downloaded_reddit_data(fetched_df_p01, fetch_subreddit_p01, fetch_query_p01, fetch_params_meta_p01, current_ts_fetch_p01)
+                    saved_filepath_fetch_p01 = data_manager.save_downloaded_reddit_data(fetched_df_p01, fetch_subreddit_p01, fetch_query_p01, fetch_params_meta_p01, current_ts_fetch_p01)
                     if saved_filepath_fetch_p01:
                         ui_helpers.show_success_message(f"Data saved to {os.path.basename(saved_filepath_fetch_p01)}")
                         if 'selected_download_files_info' in st.session_state: st.session_state.selected_download_files_info = {} 
@@ -72,13 +79,13 @@ with st.expander("Show Fetch Options", expanded=True):
         else: ui_helpers.show_error_message("Subreddit name is required.")
 
 st.divider()
-st.subheader("Manage & Combine Downloaded Datasets")
-downloaded_files_metadata_list_p01 = data_management.list_downloaded_files_metadata()
+st.subheader("Manage Downloaded Datasets")
+downloaded_files_metadata_list_p01 = data_manager.list_downloaded_files_metadata()
 
 if not downloaded_files_metadata_list_p01:
     st.info("No Reddit data downloaded for this project yet.")
 else:
-    st.markdown("**Available Downloaded Datasets:** (Select to combine)")
+    st.markdown("**Select One or More Datasets to combine**")
     display_meta_for_editor_p01 = []
     for meta_item_p01 in downloaded_files_metadata_list_p01:
         file_key_p01 = meta_item_p01["filename"]
@@ -105,7 +112,7 @@ else:
         load_and_combine_selected_downloads_for_view_p1() # Use page-specific or imported helper
         st.rerun()
 
-    st.markdown("**Combined Data from Selected Files for View Creation:**")
+    st.markdown("**Combined Dataset:**")
     combined_df_for_view_p01 = st.session_state.get('combined_data_for_view_creation', pd.DataFrame())
 
     if combined_df_for_view_p01 is not None and not combined_df_for_view_p01.empty:
@@ -130,7 +137,7 @@ else:
         
         if st.session_state.get("redact_confirm_data_management", False) and col_to_redact_view_creation_p01:
             def perform_redaction_combined_view_p01():
-                count = data_management.redact_text_column_in_place(st.session_state.combined_data_for_view_creation, col_to_redact_view_creation_p01)
+                count = data_manager.redact_text_column_in_place(st.session_state.combined_data_for_view_creation, col_to_redact_view_creation_p01)
                 msg = f"Redaction complete. {count} items processed." if count > 0 else "No items for redaction."
                 ui_helpers.show_success_message(msg)
                 st.session_state.redact_confirm_data_management = False
@@ -143,16 +150,17 @@ else:
         if not df_display_for_view_creation_p01.empty: 
             st.dataframe(df_display_for_view_creation_p01, height=300)
             st.divider()
+            st.markdown("**Create a View of the combined dataset for further analysis**")
             view_name_create_input_p01 = st.text_input("Enter Name for New View:", key="view_name_create_p01_nav")
-            if st.button("Create View from Current Data", key="create_view_button_p01_nav"):
+            if st.button("Create View", key="create_view_button_p01_nav"):
                 if not view_name_create_input_p01: ui_helpers.show_error_message("View name cannot be empty.")
                 else:
                     source_files_info_view_p01 = [data_info["metadata"]["filename"] for fn, data_info in st.session_state.selected_download_files_info.items() if data_info.get("selected", False)]
-                    if data_management.save_project_view(df_display_for_view_creation_p01, view_name_create_input_p01, source_filenames_info=source_files_info_view_p01):
+                    if data_manager.save_project_view(df_display_for_view_creation_p01, view_name_create_input_p01, source_filenames_info=source_files_info_view_p01):
                         ui_helpers.show_success_message(f"View '{view_name_create_input_p01}' created. Proceed to 'AI Coding' page.")
         elif search_term_view_p01: st.info("No data matches your search.")
-        else: st.info("Combined data is empty.")
+        else: st.info("Combined dataset is empty.")
     elif any(data_info.get("selected", False) for data_info in st.session_state.selected_download_files_info.values()):
-        st.info("Loading selected data...")
+        st.info("Loading selected dataset...")
     else:
         st.info("Select downloaded datasets above to combine.")

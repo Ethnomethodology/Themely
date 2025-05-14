@@ -1,9 +1,9 @@
-# pages/analysis_page.py
+# pages/themes.py
 import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
-from modules import data_management, ui_helpers, utils, ai_services
+from modules import data_manager, ui_helpers, utils, ai_services
 import json
 
 logger = utils.setup_logger("p03_analysis")
@@ -108,7 +108,7 @@ def load_and_combine_selected_analysis_views():
         for info in selected_infos:
             path = info["metadata"].get("csv_filepath")
             if path and os.path.exists(path):
-                df = data_management.load_data_from_specific_file(path)
+                df = data_manager.load_data_from_specific_file(path)
                 if df is not None:
                     dfs.append(df)
                     st.session_state.analysis_source_view_paths.append(path)
@@ -166,14 +166,14 @@ def update_dataframe_groups_column():
 def handle_checkbox_change(code_key, checkbox_key_in_session):
     st.session_state.manual_edit_codes_checkboxes_state[code_key] = st.session_state[checkbox_key_in_session]
 
-st.title("Analysis & Visualization")
+st.title("Themes")
 
 if not st.session_state.get('current_project_name'):
     st.warning("👈 Please create or open a project first from the '🏠 Project Setup' page.")
     st.stop()
 
 if 'edited_codebook_df' not in st.session_state or st.session_state.get('edited_codebook_df').empty:
-    loaded_cb_df = data_management.load_codebook(st.session_state.project_path)
+    loaded_cb_df = data_manager.load_codebook(st.session_state.project_path)
     if "Select" not in loaded_cb_df.columns: # Ensure 'Select' column if loading fresh
         loaded_cb_df.insert(0, "Select", False)
     st.session_state.current_codebook_df = loaded_cb_df.copy()
@@ -181,7 +181,7 @@ if 'edited_codebook_df' not in st.session_state or st.session_state.get('edited_
 
 # --- 1. View Selection ---
 st.subheader("Select Coded Project View(s) for Analysis")
-available_views_meta_analysis = data_management.list_created_views_metadata()
+available_views_meta_analysis = data_manager.list_created_views_metadata()
 if not available_views_meta_analysis:
     st.info("No project views created yet. Go to '💾 Data Management' to create views, and '🤖 AI Coding' to code them.")
 else:
@@ -255,7 +255,7 @@ if not analysis_df_master.empty:
             group_rows.append({"Group Name": group_name, "Code Name": code})
     groups_flat_df = pd.DataFrame(group_rows)
 
-    codebook_source_df = st.session_state.get('edited_codebook_df', pd.DataFrame(columns=["Select"] + data_management.CODEBOOK_COLUMNS))
+    codebook_source_df = st.session_state.get('edited_codebook_df', pd.DataFrame(columns=["Select"] + data_manager.CODEBOOK_COLUMNS))
     codebook_meta = codebook_source_df.drop(columns=["Select"], errors="ignore").copy() # Use .copy()
 
     if not groups_flat_df.empty:
@@ -276,7 +276,7 @@ if not analysis_df_master.empty:
         for meta_col in codebook_metadata_to_display:
             if meta_col in df_display.columns:
                 display_columns_ordered.append(meta_col)
-            elif meta_col in data_management.CODEBOOK_COLUMNS and meta_col not in df_display.columns:
+            elif meta_col in data_manager.CODEBOOK_COLUMNS and meta_col not in df_display.columns:
                 df_display[meta_col] = pd.NA 
                 display_columns_ordered.append(meta_col)
 
@@ -323,7 +323,7 @@ if not analysis_df_master.empty:
                     df_to_save = st.session_state.analysis_table_df.copy()
                     if 'Source View' in df_to_save.columns:
                         df_to_save = df_to_save.drop(columns=['Source View'], errors='ignore')
-                    success = data_management.save_coded_data_to_view(df_to_save, paths[0])
+                    success = data_manager.save_coded_data_to_view(df_to_save, paths[0])
                     if success:
                         ui_helpers.show_success_message(f"Groups saved to '{os.path.basename(paths[0])}'.")
                     else:

@@ -53,3 +53,35 @@ def display_interactive_table(df, key="interactive_table", height=None):
     else:
         # st.info("No data to display in table.") # Potentially too verbose if table is often empty by design
         return pd.DataFrame() # Return empty DF instead of None to avoid errors with subsequent operations
+
+
+# --- Navigation Button ---
+def nav_button(message: str, page: str, key: str = None, icon: str = ":material/arrow_forward:"):
+    """
+    Displays a centered navigation button with the given message and icon.
+    When clicked, switches to the specified multipage app page.
+    
+    Parameters:
+    - message: The text to display on the button.
+    - page: The path or name of the page to navigate to (e.g., "pages/data_management.py").
+    - key: Optional Streamlit key for the button.
+    - icon: Optional Material Symbols icon code (e.g., ":material/arrow_forward:").
+    """
+    import streamlit as st
+    # Center the button using three equal columns
+    col1, col2, col3 = st.columns([1, 1, 1], gap="small")
+    with col2:
+        if st.button(message, key=key, icon=icon):
+            st.switch_page(page)
+
+def page_sidebar_info(steps: list):
+    """
+    Renders a sidebar block with workflow steps and an About section.
+    """
+    import streamlit as st
+    with st.sidebar:
+        st.header("Steps:")
+        md_steps = "\n".join(f"{idx+1}. {step}" for idx, step in enumerate(steps))
+        st.markdown(md_steps)
+        st.header("About")
+        st.info("Themely is a tool for doing thematic analysis on Reddit data.\n\nhttps://github.com/Ethnomethodology/Themely")

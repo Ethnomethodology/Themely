@@ -155,6 +155,10 @@ dmypy.json
 # and downloaded data in a 'data/' directory. This should NOT be committed to version control.
 /data/
 
+# SQLite DB for project history
+.themely_projects.db
+*.db
+
 # If your main config.yaml could ever contain secrets (it shouldn't by design here)
 # you might ignore it, but for this app it's for general non-sensitive config.
 # config.yaml

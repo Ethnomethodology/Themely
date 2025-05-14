@@ -163,7 +163,7 @@ To allow the application to fetch data from Reddit, you need to create a "script
     *   `auth.py`: Handles authentication for API services and project setup.
     *   `reddit_api.py`: Manages Reddit API requests and data retrieval.
     *   `ai_services.py`: Manages interactions with OpenAI and Google Gemini APIs.
-    *   `data_management.py`: Handles data storage (local CSVs), redaction (Presidio), and view management.
+    *   `data_manager.py`: Handles data storage (local CSVs), redaction (Presidio), and view management.
     *   `ui_helpers.py`: UI components (notifications, tables, etc.).
     *   `utils.py`: Utility functions (config management, logging, error handling).
 *   `data/`: (Created by the app if it doesn't exist, **should be in .gitignore**)
