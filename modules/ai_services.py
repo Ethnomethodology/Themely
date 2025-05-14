@@ -158,6 +158,7 @@ def generate_code_groups_with_ai(unique_codes_list_str, prompt_template, provide
         logger.error("Prompt template for AI code grouping is missing '{unique_codes_list_json}' placeholder.")
         return {"error": "Invalid AI prompt template for code grouping."}
     final_prompt = prompt_template.replace("{unique_codes_list_json}", unique_codes_list_str)
+    logger.debug(f"Group-gen final prompt:\n{final_prompt}")
     logger.info(f"Sending unique codes list to {provider_name} with model {model_name or 'default'} for group suggestion.")
     ai_response_text_raw = None
     try:

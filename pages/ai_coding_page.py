@@ -8,6 +8,7 @@ import math # For sqrt in codebook generation prompt info
 import json
 import numpy as np
 from sentence_transformers import SentenceTransformer
+import uuid
 
 logger = utils.setup_logger("p02_ai_coding")
 # Cosine-similarity threshold for duplicate code detection
@@ -147,6 +148,15 @@ def update_codes_dialog():
         # Update in-memory
         new_codes_str = robust_list_to_comma_string_p02(selected_codes)
         st.session_state.data_for_coding_tab3.at[idx, "Codes"] = new_codes_str
+        # Update code_ids column to match selected codes
+        code_ids_list = []
+        for code in selected_codes:
+            meta = st.session_state.edited_codebook_df[
+                st.session_state.edited_codebook_df["Code Name"] == code
+            ]
+            if not meta.empty:
+                code_ids_list.append(str(meta.iloc[0]["code_id"]))
+        st.session_state.data_for_coding_tab3.at[idx, "code_ids"] = ", ".join(code_ids_list)
         # Persist to underlying file if exactly one view is loaded
         selected_paths = st.session_state.get("currently_selected_view_filepaths_for_saving_tab3", [])
         if len(selected_paths) == 1:
@@ -165,9 +175,12 @@ def update_codes_dialog():
 # --- Dialog for Asking AI to Code All Rows (Section 2) ---
 @st.dialog("Ask AI to Code", width="medium")
 def ask_ai_code_dialog():
+    # Ensure code_ids column exists for tracking code_id values
+    if 'code_ids' not in st.session_state.data_for_coding_tab3.columns:
+        st.session_state.data_for_coding_tab3['code_ids'] = ""
     # Prepare inputs
     df_data = st.session_state.data_for_coding_tab3.copy()
-    # Codebook JSON array (for injection, not for default template)
+    # Include code_id in the JSON so AI can reference it
     codebook_df = st.session_state.edited_codebook_df.drop(columns=["Select"], errors="ignore").reset_index(drop=True)
     codebook_json = codebook_df.to_json(orient="records")
     # Column selectors
@@ -218,10 +231,12 @@ For every item in the input array:
 1. Read its "{TEXT_COLUMN_NAME}" field.
 2. Decide which Code labels from the codebook apply.
    • Zero, one, or multiple codes may apply (cap at 5 per item).  
-3. Output an object with exactly two keys:
-   • "{ID_COLUMN_NAME}" — the original identifier (string)  
+3. Output an object with exactly three keys:
+   • "{ID_COLUMN_NAME}" — the original identifier (string)
    • "Codes" — a single comma-separated string of the applicable Code labels,
                or an empty string if none fit.
+   • "code_ids" — a single comma-separated string of the corresponding code_id values
+                  (from the codebook) for the Codes, or an empty string if no codes applied.
 
 RULES
 • Use Code labels **exactly** as written in the codebook.  
@@ -272,6 +287,20 @@ INPUT DATA
                     codes_str = item.get("Codes", "")
                     mask = st.session_state.data_for_coding_tab3[selected_id_col].astype(str) == item_id
                     st.session_state.data_for_coding_tab3.loc[mask, "Codes"] = codes_str
+                    # Populate code_ids: use AI-provided or derive from codebook
+                    code_ids_str = item.get("code_ids", "")
+                    if (not code_ids_str) and codes_str:
+                        # Derive code_ids by looking up each code in the codebook
+                        derived_ids = []
+                        for cd in codes_str.split(","):
+                            cd_clean = cd.strip()
+                            meta = st.session_state.edited_codebook_df[
+                                st.session_state.edited_codebook_df["Code Name"] == cd_clean
+                            ]
+                            if not meta.empty:
+                                derived_ids.append(str(meta.iloc[0]["code_id"]))
+                        code_ids_str = ", ".join(derived_ids)
+                    st.session_state.data_for_coding_tab3.loc[mask, "code_ids"] = code_ids_str
                 paths = st.session_state.currently_selected_view_filepaths_for_saving_tab3
                 if len(paths) == 1:
                     df_save = st.session_state.data_for_coding_tab3.copy()
@@ -327,7 +356,7 @@ def ai_codebook_generation_modal():
     else:
         model = st.selectbox("Gemini Model (Codebook):", ["gemini-2.0-flash", "gemini-1.5-flash"], key="ai_model_cb_gemini")
     # ---- Build FULL prompt that includes current codebook JSON so user sees everything ----
-    existing_codebook_json = st.session_state.edited_codebook_df.drop(columns=["Select"], errors="ignore").to_json(orient="records")
+    existing_codebook_json = st.session_state.edited_codebook_df.drop(columns=["Select", "code_id"], errors="ignore").to_json(orient="records")
     merge_context = (
         "CURRENT CODEBOOK (Draft)\n"
         "The JSON array below is the existing draft codebook. "
@@ -387,6 +416,11 @@ def ai_codebook_generation_modal():
         # Handle response (same as original code)
         if isinstance(response, list) and all(isinstance(item, dict) for item in response):
             new_df = pd.DataFrame(response)
+            # Rename "Code" key from AI response to "Code Name"
+            if 'Code' in new_df.columns:
+                new_df = new_df.rename(columns={'Code': 'Code Name'})
+            # Assign a unique code_id to each new code entry
+            new_df['code_id'] = [str(uuid.uuid4()) for _ in range(len(new_df))]
             for col in data_management.CODEBOOK_COLUMNS:
                 if col not in new_df.columns: new_df[col] = ""
             new_df = new_df[data_management.CODEBOOK_COLUMNS]
@@ -424,7 +458,14 @@ def manual_codebook_entry_modal():
             elif name.strip() in st.session_state.edited_codebook_df['Code Name'].values:
                 ui_helpers.show_error_message(f"Code Name '{name.strip()}' already exists.")
             else:
-                new_entry = pd.DataFrame([{ 'Select': False, 'Code Name': name.strip(), 'Description': desc.strip(), 'Rationale': rationale.strip(), 'Example_ids': ex_ids.strip() }])
+                new_entry = pd.DataFrame([{
+                    'Select': False,
+                    'code_id': str(uuid.uuid4()),
+                    'Code Name': name.strip(),
+                    'Description': desc.strip(),
+                    'Rationale': rationale.strip(),
+                    'Example_ids': ex_ids.strip()
+                }])
                 if st.session_state.edited_codebook_df.empty:
                     st.session_state.edited_codebook_df = pd.DataFrame(columns=['Select'] + data_management.CODEBOOK_COLUMNS)
                 st.session_state.edited_codebook_df = pd.concat([st.session_state.edited_codebook_df, new_entry], ignore_index=True)
@@ -793,6 +834,9 @@ else:
     # Ensure 'Codes' column exists
     if 'Codes' not in df_data_to_be_coded_sec2.columns:
         df_data_to_be_coded_sec2['Codes'] = ""
+    # Ensure code_ids column is present in the displayed table
+    if 'code_ids' not in df_data_to_be_coded_sec2.columns:
+        df_data_to_be_coded_sec2['code_ids'] = ""
     # Prepare display DataFrame with serial numbers
     df_display_sec2 = df_data_to_be_coded_sec2.copy().reset_index(drop=True)
     df_display_sec2.insert(0, "Serial No.", range(1, len(df_display_sec2) + 1))
@@ -828,6 +872,7 @@ else:
             # Clear Codes for each selected row
             for row_idx in st.session_state.selected_section2_indices:
                 st.session_state.data_for_coding_tab3.at[row_idx, "Codes"] = ""
+                st.session_state.data_for_coding_tab3.at[row_idx, "code_ids"] = ""
             # Persist to underlying file if a single view is loaded
             selected_paths = st.session_state.get("currently_selected_view_filepaths_for_saving_tab3", [])
             if len(selected_paths) == 1:
@@ -995,11 +1040,23 @@ if col_apply.button("Apply Code", key="add_code_section3_btn",
         st.session_state.selected_codebook_indices, 'Code Name'
     ].tolist()
     for row_idx in st.session_state.selected_section2_indices:
+        # Update Codes
         existing_codes = robust_comma_string_to_list_p02(df_to_update.at[row_idx, 'Codes'])
         for code in code_names:
             if code not in existing_codes:
                 existing_codes.append(code)
         df_to_update.at[row_idx, 'Codes'] = robust_list_to_comma_string_p02(existing_codes)
+        # Update code_ids
+        existing_code_ids = robust_comma_string_to_list_p02(df_to_update.at[row_idx, 'code_ids'])
+        for code in code_names:
+            meta = st.session_state.edited_codebook_df[
+                st.session_state.edited_codebook_df["Code Name"] == code
+            ]
+            if not meta.empty:
+                cid = str(meta.iloc[0]["code_id"])
+                if cid not in existing_code_ids:
+                    existing_code_ids.append(cid)
+        df_to_update.at[row_idx, 'code_ids'] = robust_list_to_comma_string_p02(existing_code_ids)
     st.session_state.data_for_coding_tab3 = df_to_update
     selected_paths = st.session_state.get('currently_selected_view_filepaths_for_saving_tab3', [])
     if len(selected_paths) == 1:

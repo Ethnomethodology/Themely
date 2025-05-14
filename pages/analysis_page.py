@@ -8,15 +8,6 @@ import json
 
 logger = utils.setup_logger("p03_analysis")
 
-# Dialog for inspecting code details
-@st.dialog("Code Details", width="large")
-def show_code_details_dialog():
-    code = st.session_state.inspected_code
-    df_all = st.session_state.analysis_table_df.copy()
-    details_df = df_all[df_all['Codes'].apply(lambda s: code in robust_comma_string_to_list_analysis(s))]
-    st.dataframe(details_df, use_container_width=True)
-    if st.button("Close"):
-        st.rerun()
 
 # --- Initialize Session State Variables for this Page ---
 if 'selected_analysis_views_info' not in st.session_state:
@@ -50,22 +41,43 @@ if 'analysis_new_view_name' not in st.session_state:
     st.session_state.analysis_new_view_name = ""
 if 'ai_grouping_prompt_template_p03' not in st.session_state:
     st.session_state.ai_grouping_prompt_template_p03 = """You are an expert qualitative researcher.
-Given the following list of unique thematic codes extracted from a dataset:
+Given the following array of code metadata extracted from the codebook:
 {unique_codes_list_json}
 
 Your task is to group the codes into 3-10 coherent, non-overlapping themes.
 For each theme (group), provide a concise "group_name" and list the specific "codes" from the input list that belong to this group.
+• Do NOT modify, merge, abbreviate, or invent any code names. Each entry in "codes" must exactly match one of the items in the provided list.
 A code MUST NOT belong to more than one group. Aim for distinct thematic clusters.
 
-Return **only** a valid JSON array where each element is an object with two fields: "group_name" (string) and "codes" (an array of strings, where each string is one of the original codes provided).
+RULES
+• Only use codes that appear in the input list; do not include any others.
+• Preserve exact spelling and capitalization of code names.
+• Do NOT invent new codes or synonyms.
+Return **only** a valid JSON array where each element is an object with three fields: 
+  • "group_name" (string)
+  • "codes" (an array of strings, where each string is one of the original codes provided)
+  • "code_ids" (an array of strings, where each string is the corresponding code_id for that code)
 Example Output Format:
 [
-  { "group_name": "Positive Experiences", "codes": ["good service", "helpful staff", "satisfied"] },
-  { "group_name": "Technical Problems", "codes": ["login issue", "slow website", "error message"] }
+  { "group_name": "Positive Experiences", 
+    "codes": ["good service", "helpful staff", "satisfied"],
+    "code_ids": ["uvea34462fji", "ihjdse3663g3", "fejyrse5426gsa"] 
+  },
+  { "group_name": "Technical Problems", 
+    "codes": ["login issue", "slow website", "error message"],
+    "code_ids": ["466huyuw35c", "ojht45wwt44", "gar3335hjyk32"] 
+  }
 ]
 Do not include any introductory text, explanations, or any characters outside the main JSON array structure.
 """
-# TEXT_PREVIEW_COLUMNS removed as Column 3 is removed
+
+# Track last selected views for analysis to preserve manual groups across reruns
+if 'last_analysis_selected_views' not in st.session_state:
+    st.session_state['last_analysis_selected_views'] = []
+
+# Track groups that have been saved to file
+if 'saved_code_groups' not in st.session_state:
+    st.session_state.saved_code_groups = {}
 
 # --- Helper Functions ---
 def robust_comma_string_to_list_analysis(code_str):
@@ -81,40 +93,44 @@ def robust_list_to_comma_string_analysis(code_list):
     return str(code_list).strip()
 
 def load_and_combine_selected_analysis_views():
-    combined_df_list = []
-    st.session_state.analysis_source_view_paths = [] 
-    selected_view_infos = [ data for data in st.session_state.selected_analysis_views_info.values() if data.get("selected", False)]
-    if not selected_view_infos:
-        st.session_state.analysis_table_df = pd.DataFrame()
-        st.session_state.created_code_groups = {} 
-        st.session_state.selected_group_filter_analysis = "Show All"
-        st.session_state.manual_edit_selected_group_radio = "Uncategorised Codes" 
-        return
-    for view_info in selected_view_infos:
-        csv_path = view_info["metadata"].get("csv_filepath")
-        if csv_path and os.path.exists(csv_path):
-            df_single_view = data_management.load_data_from_specific_file(csv_path)
-            if df_single_view is not None:
-                combined_df_list.append(df_single_view)
-                st.session_state.analysis_source_view_paths.append(csv_path)
-        else: logger.warning(f"CSV filepath missing or invalid for analysis view: {view_info['metadata'].get('view_name')}")
-    if combined_df_list:
-        concatenated_df = pd.concat(combined_df_list, ignore_index=True)
-        id_cols_present = [col for col in ['unique_app_id', 'id'] if col in concatenated_df.columns]
-        if id_cols_present:
-            dedup_col = 'unique_app_id' if 'unique_app_id' in id_cols_present else id_cols_present[0]
-            concatenated_df.drop_duplicates(subset=[dedup_col], keep='first', inplace=True)
-        else: concatenated_df.drop_duplicates(keep='first', inplace=True)
-        if 'Codes' not in concatenated_df.columns: concatenated_df['Codes'] = ""
-        else: concatenated_df['Codes'] = concatenated_df['Codes'].apply(robust_list_to_comma_string_analysis)
-        if 'groups' not in concatenated_df.columns: concatenated_df['groups'] = ""
-        else: concatenated_df['groups'] = concatenated_df['groups'].apply(robust_list_to_comma_string_analysis)
-        st.session_state.analysis_table_df = concatenated_df
-        st.session_state.created_code_groups = {} 
-        st.session_state.selected_group_filter_analysis = "Show All"
-        st.session_state.manual_edit_selected_group_radio = "Uncategorised Codes"
-    else:
-        st.session_state.analysis_table_df = pd.DataFrame()
+    selected_infos = [info for info in st.session_state.selected_analysis_views_info.values() if info.get("selected", False)]
+    current_views = [v["metadata"]["view_name"] for v in selected_infos]
+    if st.session_state.get("last_analysis_selected_views") != current_views:
+        st.session_state["last_analysis_selected_views"] = current_views
+        if not selected_infos:
+            st.session_state.analysis_table_df = pd.DataFrame()
+            st.session_state.created_code_groups = {}
+            st.session_state.selected_group_filter_analysis = "Show All"
+            st.session_state.manual_edit_selected_group_radio = "Uncategorised Codes"
+            return
+        dfs = []
+        st.session_state.analysis_source_view_paths = []
+        for info in selected_infos:
+            path = info["metadata"].get("csv_filepath")
+            if path and os.path.exists(path):
+                df = data_management.load_data_from_specific_file(path)
+                if df is not None:
+                    dfs.append(df)
+                    st.session_state.analysis_source_view_paths.append(path)
+            else:
+                logger.warning(f"Invalid CSV path for view: {info['metadata'].get('view_name')}")
+        if dfs:
+            df_all = pd.concat(dfs, ignore_index=True)
+            for col in ['unique_app_id','id']:
+                if col in df_all.columns:
+                    df_all.drop_duplicates(subset=[col], keep='first', inplace=True)
+                    break
+            if 'Codes' in df_all.columns:
+                df_all['Codes'] = df_all['Codes'].apply(robust_list_to_comma_string_analysis)
+            else:
+                df_all['Codes'] = ""
+            if 'groups' in df_all.columns:
+                df_all['groups'] = df_all['groups'].apply(robust_list_to_comma_string_analysis)
+            else:
+                df_all['groups'] = ""
+            st.session_state.analysis_table_df = df_all
+        else:
+            st.session_state.analysis_table_df = pd.DataFrame()
         st.session_state.created_code_groups = {}
         st.session_state.selected_group_filter_analysis = "Show All"
         st.session_state.manual_edit_selected_group_radio = "Uncategorised Codes"
@@ -147,11 +163,7 @@ def update_dataframe_groups_column():
                     df.loc[index, 'groups'] = robust_list_to_comma_string_analysis(current_row_groups)
     st.session_state.analysis_table_df = df
 
-# get_texts_for_codes_preview function removed
-
 def handle_checkbox_change(code_key, checkbox_key_in_session):
-    # This function is now only relevant for checkboxes NOT inside a form
-    # (i.e., when editing an existing group's codes)
     st.session_state.manual_edit_codes_checkboxes_state[code_key] = st.session_state[checkbox_key_in_session]
 
 st.title("Analysis & Visualization")
@@ -160,30 +172,43 @@ if not st.session_state.get('current_project_name'):
     st.warning("👈 Please create or open a project first from the '🏠 Project Setup' page.")
     st.stop()
 
+if 'edited_codebook_df' not in st.session_state or st.session_state.get('edited_codebook_df').empty:
+    loaded_cb_df = data_management.load_codebook(st.session_state.project_path)
+    if "Select" not in loaded_cb_df.columns: # Ensure 'Select' column if loading fresh
+        loaded_cb_df.insert(0, "Select", False)
+    st.session_state.current_codebook_df = loaded_cb_df.copy()
+    st.session_state.edited_codebook_df = loaded_cb_df.copy()
+
 # --- 1. View Selection ---
 st.subheader("Select Coded Project View(s) for Analysis")
 available_views_meta_analysis = data_management.list_created_views_metadata()
 if not available_views_meta_analysis:
     st.info("No project views created yet. Go to '💾 Data Management' to create views, and '🤖 AI Coding' to code them.")
 else:
-    display_views_for_analysis_editor = []
-    for view_meta_item in available_views_meta_analysis:
-        view_key = view_meta_item["view_name"] + "_analysis_select" 
-        if view_key not in st.session_state.selected_analysis_views_info: 
-            st.session_state.selected_analysis_views_info[view_key] = {"selected": False, "metadata": view_meta_item}
-        display_views_for_analysis_editor.append({
-            "Select": st.session_state.selected_analysis_views_info[view_key].get("selected", False), "View Name": view_meta_item["view_name"],
-            "Created On": datetime.fromisoformat(view_meta_item.get("creation_timestamp", "")).strftime("%Y-%m-%d %H:%M") if view_meta_item.get("creation_timestamp") else "N/A",
-            "Source Files Info": str(view_meta_item.get("source_files_info", "N/A")) 
-        })
-    views_df_for_analysis_editor = pd.DataFrame(display_views_for_analysis_editor)
-    edited_views_df_analysis_selection = st.data_editor( views_df_for_analysis_editor, column_config={"Select": st.column_config.CheckboxColumn(required=True)},
-        disabled=[col for col in views_df_for_analysis_editor.columns if col != "Select"], key="analysis_views_selector_editor", hide_index=True, height=min(250, (len(views_df_for_analysis_editor) + 1) * 35 + 3))
-    if not views_df_for_analysis_editor.equals(edited_views_df_analysis_selection):
-        for idx, editor_row in edited_views_df_analysis_selection.iterrows():
-            view_key_selection = editor_row["View Name"] + "_analysis_select"
-            if view_key_selection in st.session_state.selected_analysis_views_info: st.session_state.selected_analysis_views_info[view_key_selection]["selected"] = editor_row["Select"]
-        load_and_combine_selected_analysis_views(); st.rerun()
+    for vm in available_views_meta_analysis:
+        view_key = vm["view_name"] + "_analysis_select"
+        if view_key not in st.session_state.selected_analysis_views_info:
+            st.session_state.selected_analysis_views_info[view_key] = {"selected": False, "metadata": vm}
+    views_selection_df = pd.DataFrame([
+        {
+            "View Name": vm["view_name"],
+            "Created On": datetime.fromisoformat(vm.get("creation_timestamp", "")).strftime("%Y-%m-%d %H:%M") if vm.get("creation_timestamp") else "N/A",
+            "Source Files Info": ", ".join(vm.get("source_files_info") if isinstance(vm.get("source_files_info"), list) else [str(vm.get("source_files_info", ""))])
+        }
+        for vm in available_views_meta_analysis
+    ])
+    view_selection_event = st.dataframe(
+        views_selection_df,
+        hide_index=True,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="multi-row"
+    )
+    selected_idxs = view_selection_event.selection.rows if hasattr(view_selection_event, 'selection') else []
+    for idx, vm in enumerate(available_views_meta_analysis):
+        key = vm["view_name"] + "_analysis_select"
+        st.session_state.selected_analysis_views_info[key]["selected"] = idx in selected_idxs
+    load_and_combine_selected_analysis_views()
 
 st.divider()
 
@@ -201,45 +226,118 @@ if not analysis_df_master.empty:
     else:
         st.caption("No code groups defined. Use tabs below to create groups.")
         if st.session_state.selected_group_filter_analysis != "Show All": st.session_state.selected_group_filter_analysis = "Show All"
+    
     if st.session_state.selected_group_filter_analysis != "Show All" and st.session_state.selected_group_filter_analysis in st.session_state.created_code_groups:
         group_to_filter = st.session_state.selected_group_filter_analysis
         if 'groups' in displayed_analysis_df_view.columns:
             try: displayed_analysis_df_view = displayed_analysis_df_view[displayed_analysis_df_view['groups'].apply(lambda x: group_to_filter in robust_comma_string_to_list_analysis(x))]
             except Exception as e: logger.error(f"Error filtering by group: {e}"); st.error("Could not apply group filter.")
-    # Calculate dynamic table width to allow horizontal scrolling
-    table_width = min(displayed_analysis_df_view.shape[1] * 200, 2000)
-    st.dataframe(displayed_analysis_df_view, height=350, width=table_width, key="analysis_table_display_key_main")
-    col_spacer_save_analysis, col_save_analysis_button = st.columns([0.8, 0.2])
-    with col_save_analysis_button:
-        if st.button("Save Analysis Data", key="save_analysis_data_btn_main", use_container_width=True):
-            if st.session_state.analysis_table_df.empty: ui_helpers.show_error_message("No analysis data to save.")
-            else:
-                source_paths = st.session_state.get('analysis_source_view_paths', []);
-                if len(source_paths) == 1 and not st.session_state.analysis_prompt_save_as_new_view: st.session_state.confirm_overwrite_analysis_view_path = source_paths[0]
-                else: st.session_state.analysis_prompt_save_as_new_view = True
-                st.rerun()
-    if 'confirm_overwrite_analysis_view_path' in st.session_state and st.session_state.confirm_overwrite_analysis_view_path:
-        path_to_overwrite = st.session_state.confirm_overwrite_analysis_view_path; st.warning(f"Overwrite '{os.path.basename(path_to_overwrite)}'?")
-        col_confirm, col_cancel = st.columns(2)
-        if col_confirm.button("Yes, Overwrite", key="confirm_overwrite_analysis_save_main"):
-            df_to_save = st.session_state.analysis_table_df.copy(); data_management.save_coded_data_to_view(df_to_save, path_to_overwrite)
-            ui_helpers.show_success_message(f"Saved to '{os.path.basename(path_to_overwrite)}'."); del st.session_state['confirm_overwrite_analysis_view_path']; st.rerun()
-        if col_cancel.button("No, Cancel", key="cancel_overwrite_analysis_save_main"): del st.session_state['confirm_overwrite_analysis_view_path']; st.session_state.analysis_prompt_save_as_new_view = True; st.rerun()
-    if st.session_state.get("analysis_prompt_save_as_new_view", False):
-        st.info("Save current Analysis Table as new Project View.")
-        col_new_name_analysis, col_new_save_analysis = st.columns([0.7, 0.3]);
-        with col_new_name_analysis: st.session_state.analysis_new_view_name = st.text_input("Enter Name for New Analysis View:", value=st.session_state.analysis_new_view_name, key="analysis_new_view_name_input_form_key_main")
-        with col_new_save_analysis:
-            st.write("") 
-            if st.button("Confirm Save New", key="analysis_save_new_key_main", use_container_width=True):
-                new_name = st.session_state.analysis_new_view_name.strip()
-                if not new_name: ui_helpers.show_error_message("Name empty.")
-                else:
-                    df_to_save = st.session_state.analysis_table_df.copy(); sources = [os.path.basename(p) for p in st.session_state.get('analysis_source_view_paths', [])] or ["analysis session"]
-                    if data_management.save_project_view(df_to_save, new_name, source_filenames_info=sources):
-                        ui_helpers.show_success_message(f"Saved as '{new_name}'."); st.session_state.analysis_prompt_save_as_new_view = False; st.session_state.analysis_new_view_name = ""; st.rerun()
-                    else: ui_helpers.show_error_message("Save failed.")
+
+    df_event = st.dataframe(
+        displayed_analysis_df_view,
+        hide_index=True,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="multi-row"
+    )
+    selected_rows = df_event.selection.rows if hasattr(df_event, 'selection') else []
+    st.session_state.analysis_selected_rows = selected_rows
+
+    # --- END Save Analysis Data button block removed ---
+
     st.divider()
+
+    # --- Groups Overview ---
+    st.subheader("Groups Overview")
+    group_rows = []
+    for group_name, codes in st.session_state.created_code_groups.items():
+        for code in codes:
+            group_rows.append({"Group Name": group_name, "Code Name": code})
+    groups_flat_df = pd.DataFrame(group_rows)
+
+    codebook_source_df = st.session_state.get('edited_codebook_df', pd.DataFrame(columns=["Select"] + data_management.CODEBOOK_COLUMNS))
+    codebook_meta = codebook_source_df.drop(columns=["Select"], errors="ignore").copy() # Use .copy()
+
+    if not groups_flat_df.empty:
+        if "Code Name" in codebook_meta.columns and not codebook_meta.empty:
+             groups_flat_df = groups_flat_df.merge(codebook_meta, on="Code Name", how="left")
+        else:
+            logger.info("Codebook metadata ('edited_codebook_df') is empty or missing 'Code Name' column. Metadata columns in Groups Overview will be blank if not already present in groups_flat_df.")
+            for col_name in ["Description", "Rationale", "Example_ids", "code_id"]:
+                if col_name not in groups_flat_df.columns:
+                    groups_flat_df[col_name] = pd.NA
+
+    if not groups_flat_df.empty:
+        df_display = groups_flat_df.copy()
+        
+        display_columns_ordered = ["Group Name", "Code Name"]
+        codebook_metadata_to_display = ["Description", "Rationale", "Example_ids", "code_id"]
+        
+        for meta_col in codebook_metadata_to_display:
+            if meta_col in df_display.columns:
+                display_columns_ordered.append(meta_col)
+            elif meta_col in data_management.CODEBOOK_COLUMNS and meta_col not in df_display.columns:
+                df_display[meta_col] = pd.NA 
+                display_columns_ordered.append(meta_col)
+
+        remaining_cols = [col for col in df_display.columns if col not in display_columns_ordered]
+        display_columns_ordered.extend(remaining_cols)
+        
+        final_display_columns = []
+        seen_cols_display = set()
+        for col in display_columns_ordered:
+            if col in df_display.columns and col not in seen_cols_display:
+                final_display_columns.append(col)
+                seen_cols_display.add(col)
+        
+        df_display = df_display[final_display_columns].reset_index(drop=True)
+        df_display.insert(0, "Serial No.", range(1, len(df_display) + 1))
+
+        # Fill NaN with "None" for display
+        df_display_filled = df_display.fillna("None")
+
+        saved = set(st.session_state.saved_code_groups.keys())
+        styled_df = df_display_filled.style.apply(
+            lambda row: ["background-color: #e6f2ff" if row["Group Name"] not in saved else "" for _ in row],
+            axis=1
+        )
+        event_groups = st.dataframe(
+            styled_df,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="multi-row",
+            height=min(400, (len(df_display_filled) + 1) * 35 + 3)
+        )
+        st.session_state.analysis_group_selection = event_groups.selection.rows if hasattr(event_groups, "selection") else []
+
+        # --- Save Groups Button ---
+        col_spacer_groups, col_save_groups = st.columns([0.8, 0.2])
+        with col_save_groups:
+            if st.button("Save Groups", key="save_groups_btn", use_container_width=True):
+                # Apply grouped labels to the table
+                update_dataframe_groups_column()
+                # Persist to underlying single view file if present
+                paths = st.session_state.get('analysis_source_view_paths', [])
+                if len(paths) == 1:
+                    df_to_save = st.session_state.analysis_table_df.copy()
+                    if 'Source View' in df_to_save.columns:
+                        df_to_save = df_to_save.drop(columns=['Source View'], errors='ignore')
+                    success = data_management.save_coded_data_to_view(df_to_save, paths[0])
+                    if success:
+                        ui_helpers.show_success_message(f"Groups saved to '{os.path.basename(paths[0])}'.")
+                    else:
+                        ui_helpers.show_error_message(f"Failed to save groups to '{os.path.basename(paths[0])}'.")
+                else:
+                    ui_helpers.show_info("Groups applied in memory. Select a single view to persist.")
+                # Mark groups as saved
+                st.session_state.saved_code_groups = st.session_state.created_code_groups.copy()
+                st.rerun()
+        st.divider()
+    else:
+        st.info("No groups defined yet, or no codes assigned to groups.")
+
+
     st.subheader("Code Grouping Actions")
     st.caption("Define non-overlapping groups. A code can only belong to one group.")
     tab_ai_group, tab_manual_edit_group = st.tabs(["Suggest Groups with AI", "Manually edit groups"])
@@ -250,20 +348,63 @@ if not analysis_df_master.empty:
         else:
             st.info(f"Using AI Provider: **{ai_provider_analysis}**"); ai_model_analysis = None
             if ai_provider_analysis == "OpenAI": ai_model_analysis = st.selectbox("OpenAI Model:", ["gpt-4o", "gpt-4-turbo","gpt-3.5-turbo"], key="ai_model_group_openai_bottom")
-            elif ai_provider_analysis == "Gemini": ai_model_analysis = st.selectbox("Gemini Model:", ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest", "gemini-1.0-pro"], key="ai_model_group_gemini_bottom")
+            elif ai_provider_analysis == "Gemini": ai_model_analysis = st.selectbox("Gemini Model:", ["gemini-2.0-flash", "gemini-1.5-flash"], key="ai_model_group_gemini_bottom")
             all_unique_codes = get_unique_codes_from_analysis_table(); codes_already_assigned_ai = get_all_assigned_codes(); unassigned_codes_for_ai = sorted(list(set(all_unique_codes) - codes_already_assigned_ai))
             st.session_state.ai_grouping_prompt_template_p03 = st.text_area("AI Grouping Prompt:", value=st.session_state.ai_grouping_prompt_template_p03, key="ai_group_prompt_input_bottom", height=300)
             if not unassigned_codes_for_ai: st.info("All unique codes are already assigned to groups.")
             elif st.button("Generate Groups with AI", key="ai_generate_groups_btn_bottom", disabled=(not ai_model_analysis)):
                 if '{unique_codes_list_json}' not in st.session_state.ai_grouping_prompt_template_p03: ui_helpers.show_error_message("Prompt needs '{unique_codes_list_json}'.")
                 else:
-                    unassigned_codes_json_str = json.dumps(unassigned_codes_for_ai, indent=2)
+                    # Build metadata array for unassigned codes
+                    code_metadata_list = []
+                    cb_meta = st.session_state.edited_codebook_df.drop(columns=["Select"], errors="ignore")
+                    for code in unassigned_codes_for_ai:
+                        meta = cb_meta[cb_meta["Code Name"] == code]
+                        if not meta.empty:
+                            row = meta.iloc[0]
+                            # Extract example IDs and map them to text from the analysis table
+                            raw_ids = [s.strip() for s in str(row.get("Example_ids", "")).split(",") if s.strip()]
+                            df_analysis = st.session_state.analysis_table_df
+                            example_texts = []
+                            for eid in raw_ids:
+                                # match against 'unique_app_id' or 'id' column
+                                mask = pd.Series(False, index=df_analysis.index)
+                                if 'unique_app_id' in df_analysis.columns:
+                                    mask = df_analysis['unique_app_id'].astype(str) == eid
+                                elif 'id' in df_analysis.columns:
+                                    mask = df_analysis['id'].astype(str) == eid
+                                matched = df_analysis[mask]
+                                if not matched.empty:
+                                    example_texts.append(matched.iloc[0].get('text', ''))
+                            code_metadata_list.append({
+                                "code_id": str(row.get("code_id", "")),
+                                "code_name": row.get("Code Name", ""),
+                                "description": row.get("Description", ""),
+                                "rationale": row.get("Rationale", ""),
+                                "example_texts": example_texts
+                            })
+                        else:
+                            code_metadata_list.append({
+                                "code_id": "",
+                                "code_name": code,
+                                "description": "",
+                                "rationale": "",
+                                "example_texts": []
+                            })
+                    unassigned_codes_json_str = json.dumps(code_metadata_list, indent=2)
                     with st.spinner(f"Sending {len(unassigned_codes_for_ai)} codes to AI..."):
                         ai_response_groups = ai_services.generate_code_groups_with_ai(unassigned_codes_json_str, st.session_state.ai_grouping_prompt_template_p03, ai_provider_analysis, ai_model_analysis)
                     if isinstance(ai_response_groups, list) and all(isinstance(g, dict) and "group_name" in g and "codes" in g for g in ai_response_groups):
                         new_groups_ai_count = 0; temp_assigned_ai_run = set()
                         for group_data in ai_response_groups:
-                            ai_g_name = str(group_data.get("group_name", "AI_Group")).strip(); ai_g_codes = [str(c).strip() for c in group_data.get("codes", []) if str(c).strip()]
+                            ai_g_name = str(group_data.get("group_name", "AI_Group")).strip()
+                            # Clean code names by unescaping any escaped slashes
+                            raw_codes = group_data.get("codes", []) or []
+                            ai_g_codes = []
+                            for c in raw_codes:
+                                cleaned = str(c).replace("\\/", "/").strip()
+                                if cleaned:
+                                    ai_g_codes.append(cleaned)
                             if not ai_g_name or not ai_g_codes: logger.warning(f"AI empty group/codes: {group_data}"); continue
                             valid_codes_new_ai_g = [c for c in ai_g_codes if c in unassigned_codes_for_ai and c not in codes_already_assigned_ai and c not in temp_assigned_ai_run]
                             if not valid_codes_new_ai_g: logger.info(f"AI group '{ai_g_name}' no valid unassigned codes. Skipping."); continue
@@ -271,14 +412,14 @@ if not analysis_df_master.empty:
                             while final_ai_g_name_unique in st.session_state.created_code_groups: final_ai_g_name_unique = f"{ai_g_name}_{c_u}"; c_u += 1
                             st.session_state.created_code_groups[final_ai_g_name_unique] = valid_codes_new_ai_g
                             codes_already_assigned_ai.update(valid_codes_new_ai_g); temp_assigned_ai_run.update(valid_codes_new_ai_g); new_groups_ai_count += 1
-                        if new_groups_ai_count > 0: update_dataframe_groups_column(); ui_helpers.show_success_message(f"AI suggested {new_groups_ai_count} new groups.")
-                        else: ui_helpers.show_info_message("AI complete. No new valid non-overlapping groups formed.")
+                        if new_groups_ai_count > 0:
+                            ui_helpers.show_success_message(f"AI suggested {new_groups_ai_count} new groups.")
+                        else: ui_helpers.show_info("AI complete. No new valid non-overlapping groups formed.")
                         st.rerun()
                     else: err_d = str(ai_response_groups) if ai_response_groups else "No response."; ui_helpers.show_error_message(f"AI failed. Details: {err_d[:200]}..."); logger.error(f"AI group failed: {ai_response_groups}")
     
     with tab_manual_edit_group:
         st.header("Manage Group Assignments")
-        # Layout changes to 2 columns
         col1_manual, col2_manual = st.columns([0.35, 0.65]) 
         all_db_unique_codes = get_unique_codes_from_analysis_table()
         assigned_codes_globally = get_all_assigned_codes()
@@ -318,7 +459,6 @@ if not analysis_df_master.empty:
             
             if current_selection_context == "Uncategorised Codes":
                 if st.session_state.manual_edit_uncategorised_action_radio == "Create New Group":
-                    # Custom group creation UI to allow Inspect buttons
                     st.session_state.manual_edit_new_group_name_input = st.text_input(
                         "New Group Name:",
                         value=st.session_state.manual_edit_new_group_name_input,
@@ -331,37 +471,43 @@ if not analysis_df_master.empty:
                     )
                     codes_to_display_checkboxes = [c for c in uncategorised_codes_list if st.session_state.manual_edit_code_search_input.lower() in c.lower()] if st.session_state.manual_edit_code_search_input else uncategorised_codes_list
                     st.caption("Select uncategorised codes for this new group:")
-                    # Collect selected codes and provide Inspect buttons
-                    selected_codes = []
+                    selected_codes_create_new_form = [] 
                     with st.container(height=300):
-                        for code in codes_to_display_checkboxes:
+                        for idx_code, code in enumerate(codes_to_display_checkboxes):
                             col_cb, col_btn = st.columns([0.75, 0.25])
-                            checked = col_cb.checkbox(
+                            checkbox_key = f"cb_new_uncat_{utils.generate_project_id(code)}_{idx_code}"
+                            is_checked = col_cb.checkbox(
                                 code,
                                 value=st.session_state.manual_edit_codes_checkboxes_state.get(code, False),
-                                key=f"cb_new_{utils.generate_project_id(code)}"
+                                key=checkbox_key
                             )
-                            if checked:
-                                selected_codes.append(code)
-                            if col_btn.button("Inspect", key=f"inspect_{utils.generate_project_id(code)}"):
-                                st.session_state.inspected_code = code
-                                show_code_details_dialog()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    # Finalize group creation
-                    if st.button("Create Group"):
+                            if st.session_state.manual_edit_codes_checkboxes_state.get(code, False) != is_checked:
+                                st.session_state.manual_edit_codes_checkboxes_state[code] = is_checked
+
+                            if is_checked: 
+                                selected_codes_create_new_form.append(code)
+
+                            if col_btn.button("Inspect", key=f"inspect_btn_uncat_new_{utils.generate_project_id(code)}_{idx_code}"):
+                                df_all = st.session_state.analysis_table_df.copy()
+                                details_df = df_all[df_all['Codes'].apply(lambda s: code in robust_comma_string_to_list_analysis(s))]
+                                st.session_state.inspect_dialog_code_occurrences = details_df
+                                st.session_state.inspect_dialog_code_name = code
+                                inspect_code_occurrences_dialog(title=f"Occurrences of '{code}'")
+
+                    if st.button("Create Group", key="create_group_manual_btn_col2_form"):
                         new_g_name = st.session_state.manual_edit_new_group_name_input.strip()
+                        codes_for_new_group = selected_codes_create_new_form
                         if not new_g_name:
                             ui_helpers.show_error_message("Name empty.")
-                        elif not selected_codes:
+                        elif not codes_for_new_group: 
                             ui_helpers.show_error_message("Select codes.")
                         elif new_g_name in st.session_state.created_code_groups:
                             ui_helpers.show_error_message(f"Group '{new_g_name}' exists.")
                         else:
-                            st.session_state.created_code_groups[new_g_name] = selected_codes.copy()
-                            update_dataframe_groups_column()
+                            st.session_state.created_code_groups[new_g_name] = codes_for_new_group.copy()
                             ui_helpers.show_success_message(f"Group '{new_g_name}' created.")
                             st.session_state.manual_edit_new_group_name_input = ""
-                            st.session_state.manual_edit_codes_checkboxes_state = {}
+                            st.session_state.manual_edit_codes_checkboxes_state = {} 
                             st.rerun()
                 
                 elif st.session_state.manual_edit_uncategorised_action_radio == "Add to Existing Group":
@@ -369,16 +515,16 @@ if not analysis_df_master.empty:
                     if not existing_g_names: st.warning("No existing groups. Create one first.")
                     else:
                         with st.form("col2_add_to_existing_form"):
-                            # Order: Target Group, then Search, then Checkboxes
                             st.session_state.manual_edit_add_to_group_dropdown = st.selectbox("Target Group:", options=existing_g_names, key="col2_add_to_group_dd", index=existing_g_names.index(st.session_state.manual_edit_add_to_group_dropdown) if st.session_state.manual_edit_add_to_group_dropdown in existing_g_names else 0)
                             st.session_state.manual_edit_code_search_input = st.text_input("Search uncategorised codes:", value=st.session_state.manual_edit_code_search_input, key="col2_search_uncat_for_existing")
                             
                             codes_to_display_checkboxes = [c for c in uncategorised_codes_list if st.session_state.manual_edit_code_search_input.lower() in c.lower()] if st.session_state.manual_edit_code_search_input else uncategorised_codes_list
                             st.caption("Select uncategorised codes to add:")
                             current_form_checkbox_selections = {}
-                            with st.container(height=150):
+                            with st.container(height=150): 
                                 for code in codes_to_display_checkboxes: 
                                     current_form_checkbox_selections[code] = st.checkbox(code, value=st.session_state.manual_edit_codes_checkboxes_state.get(code,False), key=f"form_cb_uncat_add_{utils.generate_project_id(code)}_col2")
+                            
                             if st.form_submit_button("Add to Group"):
                                 target_g = st.session_state.manual_edit_add_to_group_dropdown; selected_c_add = [c for c,chk in current_form_checkbox_selections.items() if chk]
                                 if not target_g: ui_helpers.show_error_message("Select target group.")
@@ -386,30 +532,54 @@ if not analysis_df_master.empty:
                                 else: 
                                     st.session_state.created_code_groups[target_g].extend(c for c in selected_c_add if c not in st.session_state.created_code_groups[target_g]); 
                                     st.session_state.created_code_groups[target_g] = sorted(list(set(st.session_state.created_code_groups[target_g]))); 
-                                    update_dataframe_groups_column(); 
                                     ui_helpers.show_success_message(f"Codes added to '{target_g}'."); 
                                     st.session_state.manual_edit_codes_checkboxes_state = {}; 
                                     st.session_state.manual_edit_selected_group_radio = target_g; 
                                     st.rerun()
             
             elif current_selection_context in st.session_state.created_code_groups: 
-                # Order: Search, then Checkboxes (no group name input here)
                 st.session_state.manual_edit_code_search_input = st.text_input(f"Search codes within '{current_selection_context}':", value=st.session_state.manual_edit_code_search_input, key="col2_search_in_selected_group")
                 codes_in_selected_group = sorted(st.session_state.created_code_groups[current_selection_context])
                 codes_to_display_checkboxes = [c for c in codes_in_selected_group if st.session_state.manual_edit_code_search_input.lower() in c.lower()] if st.session_state.manual_edit_code_search_input else codes_in_selected_group
                 
                 st.caption(f"Codes in '{current_selection_context}'. Uncheck to remove from this group upon update.")
-                with st.container(height=200):
+                with st.container(height=200): 
                     for code in codes_to_display_checkboxes: 
                         cb_key = f"cb_existing_g_{utils.generate_project_id(code)}_{utils.generate_project_id(current_selection_context)}_col2"
-                        st.checkbox(code, value=st.session_state.manual_edit_codes_checkboxes_state.get(code, True), 
-                                    key=cb_key, on_change=handle_checkbox_change, args=(code, cb_key)) 
+                        col_cb_exist, col_btn_exist = st.columns([0.8, 0.2])
+                        with col_cb_exist:
+                            is_checked_now = st.checkbox(code, value=st.session_state.manual_edit_codes_checkboxes_state.get(code, True), 
+                                        key=cb_key, on_change=handle_checkbox_change, args=(code, cb_key))
+                        with col_btn_exist:
+                            if st.button("Inspect", key=f"inspect_btn_exist_g_{utils.generate_project_id(code)}_{utils.generate_project_id(current_selection_context)}"):
+                                df_all = st.session_state.analysis_table_df.copy()
+                                details_df = df_all[df_all['Codes'].apply(lambda s: code in robust_comma_string_to_list_analysis(s))]
+                                st.session_state.inspect_dialog_code_occurrences = details_df
+                                st.session_state.inspect_dialog_code_name = code
+                                inspect_code_occurrences_dialog(title=f"Occurrences of '{code}'") 
+
                 if st.button(f"Update Group '{current_selection_context}' (Remove Unchecked)", key="col2_update_group_btn"):
-                    codes_to_keep = [c for c in codes_in_selected_group if st.session_state.manual_edit_codes_checkboxes_state.get(c, False)] 
+                    codes_to_keep = [c for c in codes_in_selected_group if st.session_state.manual_edit_codes_checkboxes_state.get(c, True)] 
                     original_codes_this_group = set(st.session_state.created_code_groups[current_selection_context]); removed_count = len(original_codes_this_group - set(codes_to_keep))
                     if not codes_to_keep: del st.session_state.created_code_groups[current_selection_context]; ui_helpers.show_success_message(f"Group '{current_selection_context}' removed."); st.session_state.manual_edit_selected_group_radio = "Uncategorised Codes"
                     else: st.session_state.created_code_groups[current_selection_context] = codes_to_keep; ui_helpers.show_success_message(f"Group '{current_selection_context}' updated. {removed_count} code(s) uncategorised.")
-                    update_dataframe_groups_column(); st.session_state.manual_edit_codes_checkboxes_state = {}; st.rerun() 
-            else: st.empty() # Should not be reached if radio state is managed
+                    st.session_state.manual_edit_codes_checkboxes_state = {}; st.rerun() 
+            else: st.empty()
 else: 
     st.info("Select one or more views to load data for analysis and grouping.")
+
+@st.dialog("Inspect Code Occurrences")
+def inspect_code_occurrences_dialog(title="Inspect Code Occurrences"):
+    st.title(title)
+    occurrences_df = st.session_state.get("inspect_dialog_code_occurrences", pd.DataFrame())
+    if not occurrences_df.empty:
+        cols_to_show = [col for col in ['unique_app_id', 'id', 'text', 'title', 'Codes', 'groups'] if col in occurrences_df.columns]
+        st.dataframe(occurrences_df[cols_to_show], use_container_width=True)
+    else:
+        st.info(f"No occurrences found for code: {st.session_state.get('inspect_dialog_code_name', 'N/A')}")
+    if st.button("Close Inspection Dialog", key="close_inspect_code_occurrences_dialog_btn"): 
+        if "inspect_dialog_code_occurrences" in st.session_state:
+            del st.session_state.inspect_dialog_code_occurrences
+        if "inspect_dialog_code_name" in st.session_state:
+            del st.session_state.inspect_dialog_code_name
+        st.rerun()

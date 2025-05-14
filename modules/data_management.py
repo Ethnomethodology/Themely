@@ -9,6 +9,7 @@ import os
 import json
 import glob
 from datetime import datetime
+import uuid
 
 logger = utils.setup_logger(__name__)
 
@@ -26,7 +27,7 @@ DOWNLOADS_SUBFOLDER = "reddit_downloads"
 VIEWS_SUBFOLDER = "project_views"
 CODEBOOK_SUBFOLDER = "codes" # New constant for codebook
 CODEBOOK_FILENAME = "project_codebook.csv" # New constant for codebook filename
-CODEBOOK_COLUMNS = ["Code Name", "Description", "Rationale", "Example_ids"] # New constant
+CODEBOOK_COLUMNS = ["code_id", "Code Name", "Description", "Rationale", "Example_ids"] # New constant
 
 def save_downloaded_reddit_data(df, subreddit_name, query_str, fetch_params, timestamp):
     project_path = st.session_state.project_path
@@ -201,6 +202,9 @@ def load_codebook(project_path):
     if os.path.exists(codebook_filepath):
         try:
             df = pd.read_csv(codebook_filepath)
+            # Ensure a unique code_id column exists
+            if 'code_id' not in df.columns:
+                df['code_id'] = [str(uuid.uuid4()) for _ in range(len(df))]
             # Ensure all necessary columns exist, even if CSV was manipulated
             for col in CODEBOOK_COLUMNS:
                 if col not in df.columns:
@@ -232,6 +236,15 @@ def save_codebook(df_codebook, project_path):
         df_to_save = df_codebook.copy()
         if 'Example_ids' in df_to_save.columns:
             df_to_save['Example_ids'] = df_to_save['Example_ids'].astype(str).fillna('')
+        # Ensure code_id column exists for new entries
+        if 'code_id' not in df_to_save.columns:
+            df_to_save['code_id'] = [str(uuid.uuid4()) for _ in range(len(df_to_save))]
+        else:
+            missing_mask = df_to_save['code_id'].isna() | (df_to_save['code_id'].astype(str).str.strip() == '')
+            if missing_mask.any():
+                df_to_save.loc[missing_mask, 'code_id'] = [str(uuid.uuid4()) for _ in range(missing_mask.sum())]
+        # Reorder to match CODEBOOK_COLUMNS
+        df_to_save = df_to_save.reindex(columns=CODEBOOK_COLUMNS)
 
         df_to_save.to_csv(codebook_filepath, index=False)
         logger.info(f"Codebook saved to {codebook_filepath}")
