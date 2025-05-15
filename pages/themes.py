@@ -7,6 +7,12 @@ from modules import data_manager, ui_helpers, utils, ai_services
 import json
 
 logger = utils.setup_logger("p03_analysis")
+ui_helpers.page_sidebar_info([
+    "Select Coded View(s) to list their record",
+    "Cluster Groups of your selected view(s) using AI",
+    "Review AI-generated Groups",
+    "Save groups to the dataset once verified"
+])
 
 
 # --- Initialize Session State Variables for this Page ---

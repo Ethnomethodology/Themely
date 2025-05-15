@@ -9,6 +9,12 @@ import re # Import re for regex in group filtering
 import math # For ceiling function for sample size
 
 logger = utils.setup_logger("p04_analysis")
+ui_helpers.page_sidebar_info([
+    "Select View(s) for Analysis",
+    "Review the records of each group present in your selected view(s)",
+    "Generate summary of individual group using your preferred AI service",
+    "Edit or Regenerate Summaries."
+])
 
 # --- Constants ---
 ANALYSIS_SUBFOLDER = "Analysis"
@@ -391,7 +397,7 @@ else:
 
                 for i, group_name_tab_str in enumerate(unique_groups):
                     with group_tabs[i]:
-                        st.subheader(f"Analysis for Group: {group_name_tab_str}")
+                        st.subheader(f"Group: {group_name_tab_str}")
 
                         group_df_display = current_combined_df[current_combined_df['groups'].astype(str).str.contains(f'(?<![^, ]){re.escape(group_name_tab_str)}(?![^, ])', na=False, regex=True)]
                         if not group_df_display.empty:
