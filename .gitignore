@@ -179,3 +179,5 @@ client_secret*.json # For Google OAuth, though ideally fetched or env var
 secrets.yaml
 *.key
 *.pem
+
+# Notebooks
