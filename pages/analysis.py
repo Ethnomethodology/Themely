@@ -10,10 +10,10 @@ import math # For ceiling function for sample size
 
 logger = utils.setup_logger("p04_analysis")
 ui_helpers.page_sidebar_info([
-    "Select View(s) for Analysis",
-    "Review the records of each group present in your selected view(s)",
-    "Generate summary of individual group using your preferred AI service",
-    "Edit or Regenerate Summaries."
+    "Select views",
+    "Review groups",
+    "Generate summaries",
+    "Edit summaries"
 ])
 
 # --- Constants ---
@@ -286,17 +286,18 @@ def ai_raw_summary_json_dialog():
 
 # --- Main Page Logic ---
 st.title("Analysis")
+st.write("Explore thematic groups and generate AI-driven summaries.")
 
 if not st.session_state.get('current_project_name'):
-    st.warning("👈 Please create or open a project first from the '🏠 Project Setup' page.")
+    st.warning("Please create or open a project on the Project Setup page.")
     st.stop()
 
 # --- 1. View Selection ---
-st.subheader("Select Grouped View(s) for Analysis")
+st.subheader("Select views")
 available_views_meta_analysis = data_manager.list_created_views_metadata()
 
 if not available_views_meta_analysis:
-    st.info("No project views created yet. Go to '💾 Data Management' to create views, and 'Themes' to group the codes.")
+    st.info("No project views created yet. Go to the Data Management page to create views, and to Themes to group codes.")
 else:
     for vm in available_views_meta_analysis:
         view_key = vm["view_name"] + "_analysis_select_p04"

@@ -13,10 +13,10 @@ import uuid
 
 logger = utils.setup_logger("p02_ai_coding")
 ui_helpers.page_sidebar_info([
-    "Select View(s) for Coding",
-    "Generate a Codebook based your selected view(s)",
-    "Review codes in your codebook",
-    "Apply codes from your codebook to the selected view(s)"
+    "Select views",
+    "Generate codebook",
+    "Review codes",
+    "Apply codes"
 ])
 
 # Cosine-similarity threshold for duplicate code detection
@@ -530,7 +530,7 @@ def duplicate_codes_dialog():
     )
 
     if not clusters:
-        st.success("No semantic duplicates detected 🎉")
+        st.success("No semantic duplicates detected.")
         if st.button("Close"):
             st.rerun()
         return
@@ -667,9 +667,10 @@ if "inspect_dialog_id_column" not in st.session_state: st.session_state.inspect_
 
 
 st.title("Codebook")
+st.write("Organize codebooks and apply codes to your selected data views.")
 
 if not st.session_state.get('current_project_name') or not st.session_state.get('project_path'):
-    st.warning("👈 Please create or open a project first from the '🏠 Project Setup' page.")
+    st.warning("Please create or open a project on the Project Setup page.")
     st.stop()
 
 if st.session_state.current_project_name and st.session_state.project_path:
@@ -688,7 +689,7 @@ ai_provider_configured = st.session_state.project_config.get('ai_provider') and 
                          st.session_state.project_config.get(f"{st.session_state.project_config.get('ai_provider', '').lower()}_api", {}).get('api_key')
 
 if not ai_provider_configured:
-    st.warning("AI Provider and/or API Key not configured. Please set them on the '🏠 Project Setup' page to enable AI features.")
+    st.warning("AI provider or API key not configured. Please set them on the Project Setup page to enable AI features.")
 
 def robust_list_to_comma_string_p02(code_input):
     if isinstance(code_input, list): return ", ".join(str(c).strip() for c in code_input if str(c).strip())
@@ -815,10 +816,10 @@ def load_and_combine_selected_views_for_coding_p02():
         st.session_state.data_for_coding_tab3 = pd.DataFrame()
         st.session_state.data_for_row_wise_coding_actions = pd.DataFrame()
 
-st.subheader("Select View(s) for Coding")
+st.subheader("Select views")
 available_views_meta_p02 = data_manager.list_created_views_metadata()
 if not available_views_meta_p02:
-    st.info("No project views created yet. Go to '💾 Data Management' page to create a view.")
+    st.info("No project views created yet. Go to the Data Management page to create a view.")
 else:
     # Build DataFrame without custom 'Select' column
     views_list = []
@@ -851,7 +852,7 @@ else:
     load_and_combine_selected_views_for_coding_p02()
 st.divider()
 
-st.subheader("Data to be Coded")
+st.subheader("Data to be coded")
 df_data_to_be_coded_sec2 = st.session_state.get('data_for_coding_tab3', pd.DataFrame())
 if df_data_to_be_coded_sec2.empty:
     st.info("Select one or more views from the table above (Section 1) to load data.")
@@ -928,15 +929,15 @@ st.divider()
 
 
 
-st.subheader("Manage Codebook")
+st.subheader("Manage codebook")
 # >>> MOVE_TABLE_HERE >>>
 st.markdown("**Draft Codes**")
 st.caption("Select one or more codebook entries below to inspect their examples.")
 # Buttons for codebook entry
 col_ai, col_manual = st.columns(2)
-if col_ai.button("Ask AI to Generate Codebook", use_container_width=True, help="Use Your Preferred AI Service to Generate Code"):
+if col_ai.button("Generate codebook with AI", use_container_width=True, help="Use Your Preferred AI Service to Generate Code"):
     ai_codebook_generation_modal()
-if col_manual.button("Manual Codebook Entry", use_container_width=True, help="Add codes to your codebook manually"):
+if col_manual.button("Add manual entry", use_container_width=True, help="Add codes to your codebook manually"):
     manual_codebook_entry_modal()
 # Prepare DataFrame for selection (drop internal columns)
 df_codebook = st.session_state.edited_codebook_df.copy()

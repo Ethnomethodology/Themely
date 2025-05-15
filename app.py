@@ -76,10 +76,11 @@ The input data batch you need to process is below:
 def project_setup_page_content():
     st.title("Themely")
     st.header("Project Setup")
+    st.write("Get started by creating a new project or opening an existing one, then enter your Reddit and AI service API keys.")
     ui_helpers.page_sidebar_info([
         "Create or open a project",
-        "Add your Reddit API keys",
-        "Configure your AI Service"
+        "Enter Reddit API credentials",
+        "Configure AI provider"
     ])
     # Begin two-column layout
     left_col, right_col = st.columns([1, 1])
@@ -110,7 +111,7 @@ def project_setup_page_content():
             with col_name_cr:
                 name_input_key_cr = "ui_create_name_input_key_home_nav"
                 ui_name_val_cr = st.text_input(
-                    "Name:", value=st.session_state.ui_project_name_input, 
+                    "Project name:", value=st.session_state.ui_project_name_input, 
                     key=name_input_key_cr, on_change=lambda: setattr(st.session_state, 'ui_project_name_input', st.session_state[name_input_key_cr])
                 )
                 st.session_state.ui_project_name_input = ui_name_val_cr
@@ -177,7 +178,7 @@ def project_setup_page_content():
         elif st.session_state.project_action_choice == "Open Project":
             open_config_path_key = "ui_open_config_file_path_input_key_home_nav"
             config_file_path_open_val = st.text_input(
-                "Config File Path:",
+                "Project config file:",
                 value=st.session_state.ui_open_config_file_path_input, key=open_config_path_key,
                 on_change=lambda: setattr(st.session_state, 'ui_open_config_file_path_input', st.session_state[open_config_path_key])
             )

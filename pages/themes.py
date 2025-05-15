@@ -8,10 +8,10 @@ import json
 
 logger = utils.setup_logger("p03_analysis")
 ui_helpers.page_sidebar_info([
-    "Select Coded View(s) to list their record",
-    "Cluster Groups of your selected view(s) using AI",
-    "Review AI-generated Groups",
-    "Save groups to the dataset once verified"
+    "Select views",
+    "Generate themes",
+    "Review themes",
+    "Save groups"
 ])
 
 
@@ -217,9 +217,10 @@ def handle_checkbox_change(code_key, checkbox_key_in_session):
     st.session_state.manual_edit_codes_checkboxes_state[code_key] = st.session_state[checkbox_key_in_session]
 
 st.title("Themes")
+st.write("Manage thematic grouping of your coded data views.")
 
 if not st.session_state.get('current_project_name'):
-    st.warning("👈 Please create or open a project first from the '🏠 Project Setup' page.")
+    st.warning("Please create or open a project on the Project Setup page.")
     st.stop()
 
 if 'edited_codebook_df' not in st.session_state or st.session_state.get('edited_codebook_df').empty:

@@ -4,19 +4,19 @@ import streamlit as st
 # --- Notifications ---
 def show_success_message(message):
     """Displays a success message."""
-    st.success(f"✓ {message}")
+    st.success(message)
 
 def show_warning_message(message):
     """Displays a warning message."""
-    st.warning(f"⚠️ {message}")
+    st.warning(message)
 
 def show_error_message(message):
     """Displays an error message."""
-    st.error(f"❌ {message}")
+    st.error(message)
 
 def show_info(message):
     """Displays an informational message."""
-    st.info(f"ℹ️ {message}")
+    st.info(message)
 
 # --- Progress Bars and Spinners ---
 def show_progress_bar(progress_value, text="Processing..."):
@@ -60,7 +60,7 @@ def display_interactive_table(df, key="interactive_table", height=None):
 
 
 # --- Navigation Button ---
-def nav_button(message: str, page: str, key: str = None, icon: str = ":material/arrow_forward:"):
+def nav_button(message: str, page: str, key: str = None, icon: str = ":material/forward:"):
     """
     Displays a centered navigation button with the given message and icon.
     When clicked, switches to the specified multipage app page.
@@ -69,7 +69,7 @@ def nav_button(message: str, page: str, key: str = None, icon: str = ":material/
     - message: The text to display on the button.
     - page: The path or name of the page to navigate to (e.g., "pages/data_management.py").
     - key: Optional Streamlit key for the button.
-    - icon: Optional Material Symbols icon code (e.g., ":material/arrow_forward:").
+    - icon: Optional Material Symbols icon code (e.g., ":material/forward:").
     """
     import streamlit as st
     # Center the button using three equal columns
