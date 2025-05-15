@@ -14,6 +14,10 @@ def show_error_message(message):
     """Displays an error message."""
     st.error(f"❌ {message}")
 
+def show_info(message):
+    """Displays an informational message."""
+    st.info(f"ℹ️ {message}")
+
 # --- Progress Bars and Spinners ---
 def show_progress_bar(progress_value, text="Processing..."):
     """Displays a progress bar with optional text."""

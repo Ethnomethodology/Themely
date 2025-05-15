@@ -153,7 +153,23 @@ def generate_codes_for_batch_with_ai(batch_data_df, provider_name, prompt_templa
 
 def generate_code_groups_with_ai(unique_codes_list_str, prompt_template, provider_name, model_name=None):
     client_or_module = get_ai_client(provider_name)
-    if not client_or_module: return {"error": "AI client not initialized for code grouping."}
+    if not client_or_module:
+        return {"error": "AI client not initialized for code grouping."}
+    # Inject existing groups JSON if placeholder present
+    if "{existing_groups_json}" in prompt_template:
+        existing = []
+        cb_meta = st.session_state.get("edited_codebook_df", pd.DataFrame())
+        for grp, codes in st.session_state.get("created_code_groups", {}).items():
+            ids = []
+            for code in codes:
+                match = cb_meta[cb_meta["Code Name"] == code]
+                if not match.empty:
+                    ids.append(str(match.iloc[0]["code_id"]))
+            existing.append({"group_name": grp, "codes": codes, "code_ids": ids})
+        prompt_template = prompt_template.replace(
+            "{existing_groups_json}",
+            json.dumps(existing, indent=2)
+        )
     if "{unique_codes_list_json}" not in prompt_template:
         logger.error("Prompt template for AI code grouping is missing '{unique_codes_list_json}' placeholder.")
         return {"error": "Invalid AI prompt template for code grouping."}
@@ -173,22 +189,30 @@ def generate_code_groups_with_ai(unique_codes_list_str, prompt_template, provide
             model_instance_gemini = gemini_module.GenerativeModel(selected_model_gemini, generation_config=genai.types.GenerationConfig(temperature=0.2))
             response_gemini = model_instance_gemini.generate_content(final_prompt)
             ai_response_text_raw = response_gemini.text.strip()
-        if not ai_response_text_raw: raise ValueError("AI returned an empty response for code grouping.")
+        if not ai_response_text_raw:
+            raise ValueError("AI returned an empty response for code grouping.")
         logger.debug(f"AI Raw Response (Group Gen) Snippet: {ai_response_text_raw[:500]}...")
         cleaned_json_string = extract_json_from_ai_response(ai_response_text_raw)
-        if not cleaned_json_string: raise ValueError("Could not extract a valid JSON structure from AI response for group gen.")
+        # Store raw grouping JSON for inspection
+        st.session_state["last_ai_grouping_json"] = cleaned_json_string
+        if not cleaned_json_string:
+            raise ValueError("Could not extract a valid JSON structure from AI response for group gen.")
         logger.debug(f"Cleaned JSON String (Group Gen) Snippet for parsing: {cleaned_json_string[:500]}...")
         parsed_results = json.loads(cleaned_json_string)
         if not isinstance(parsed_results, list):
             if isinstance(parsed_results, dict) and "group_name" in parsed_results and "codes" in parsed_results:
-                 logger.warning("AI returned a single group object, wrapping it in a list for group gen.")
-                 parsed_results = [parsed_results]
-            else: raise ValueError("AI response for group gen, after cleaning, was not a JSON array of groups or a single group object.")
+                logger.warning("AI returned a single group object, wrapping it in a list for group gen.")
+                parsed_results = [parsed_results]
+            else:
+                raise ValueError("AI response for group gen, after cleaning, was not a JSON array of groups or a single group object.")
         validated_groups = []
         for item in parsed_results:
-            if isinstance(item, dict) and "group_name" in item and "codes" in item and isinstance(item["codes"], list): validated_groups.append(item)
-            else: logger.warning(f"Skipping malformed group object from AI: {item}")
-        if not validated_groups and parsed_results: raise ValueError("AI response parsed but contained no validly structured group objects.")
+            if isinstance(item, dict) and "group_name" in item and "codes" in item and isinstance(item["codes"], list):
+                validated_groups.append(item)
+            else:
+                logger.warning(f"Skipping malformed group object from AI: {item}")
+        if not validated_groups and parsed_results:
+            raise ValueError("AI response parsed but contained no validly structured group objects.")
         return validated_groups
     except json.JSONDecodeError as e:
         error_msg = f"Failed to decode AI JSON response for group gen: {e}. Cleaned: '{cleaned_json_string[:200] if 'cleaned_json_string' in locals() else 'N/A'}'. Raw: '{ai_response_text_raw[:200] if ai_response_text_raw else 'N/A'}'"

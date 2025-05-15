@@ -41,6 +41,10 @@ if 'analysis_new_view_name' not in st.session_state:
     st.session_state.analysis_new_view_name = ""
 if 'ai_grouping_prompt_template_p03' not in st.session_state:
     st.session_state.ai_grouping_prompt_template_p03 = """You are an expert qualitative researcher.
+CURRENT GROUPS (Draft)
+The JSON array below is your existing themes (may be empty if none):
+{existing_groups_json}
+
 Given the following array of code metadata extracted from the codebook:
 {unique_codes_list_json}
 
@@ -79,6 +83,31 @@ if 'last_analysis_selected_views' not in st.session_state:
 if 'saved_code_groups' not in st.session_state:
     st.session_state.saved_code_groups = {}
 
+# Ensure we only load the groups overview CSV once per session to avoid overwriting in-memory group edits
+if 'groups_overview_loaded' not in st.session_state:
+    st.session_state['groups_overview_loaded'] = False
+
+# Load persisted groups overview and initialize created_code_groups (but only once per session)
+groups_overview_path = None
+if st.session_state.get("project_path"):
+    groups_dir = os.path.join(st.session_state.project_path, "groups")
+    groups_overview_path = os.path.join(groups_dir, "groups_overview.csv")
+if not st.session_state['groups_overview_loaded']:
+    if groups_overview_path and os.path.exists(groups_overview_path):
+        df_overview = pd.read_csv(groups_overview_path)
+        st.session_state.groups_overview_df = df_overview
+        # Populate created_code_groups and saved_code_groups from overview
+        st.session_state.created_code_groups = {}
+        st.session_state.saved_code_groups = {}
+        for _, row in df_overview.iterrows():
+            grp = row["Group Name"]
+            code = row["Code Name"]
+            st.session_state.created_code_groups.setdefault(grp, []).append(code)
+            st.session_state.saved_code_groups.setdefault(grp, []).append(code)
+    else:
+        st.session_state.groups_overview_df = pd.DataFrame()
+    st.session_state['groups_overview_loaded'] = True
+
 # --- Helper Functions ---
 def robust_comma_string_to_list_analysis(code_str):
     if pd.isna(code_str) or not str(code_str).strip(): return []
@@ -99,7 +128,7 @@ def load_and_combine_selected_analysis_views():
         st.session_state["last_analysis_selected_views"] = current_views
         if not selected_infos:
             st.session_state.analysis_table_df = pd.DataFrame()
-            st.session_state.created_code_groups = {}
+            # st.session_state.created_code_groups = {}  # Do not clear created_code_groups when no views are selected
             st.session_state.selected_group_filter_analysis = "Show All"
             st.session_state.manual_edit_selected_group_radio = "Uncategorised Codes"
             return
@@ -129,9 +158,10 @@ def load_and_combine_selected_analysis_views():
             else:
                 df_all['groups'] = ""
             st.session_state.analysis_table_df = df_all
+            # Apply group definitions to the loaded data immediately
+            update_dataframe_groups_column()
         else:
             st.session_state.analysis_table_df = pd.DataFrame()
-        st.session_state.created_code_groups = {}
         st.session_state.selected_group_filter_analysis = "Show All"
         st.session_state.manual_edit_selected_group_radio = "Uncategorised Codes"
 
@@ -163,6 +193,20 @@ def update_dataframe_groups_column():
                     df.loc[index, 'groups'] = robust_list_to_comma_string_analysis(current_row_groups)
     st.session_state.analysis_table_df = df
 
+# --- AI Grouping JSON Inspection Dialog ---
+@st.dialog("AI Raw Grouping JSON")
+def ai_group_json_dialog():
+    st.title("AI Raw Grouping JSON")
+    json_str = st.session_state.get("last_ai_grouping_json", "")
+    if json_str:
+        st.code(json_str, language="json")
+    else:
+        st.info("No AI JSON available.")
+    if st.button("Close", key="close_ai_group_json_dialog"):
+        if "last_ai_grouping_json" in st.session_state:
+            del st.session_state["last_ai_grouping_json"]
+        st.rerun()
+
 def handle_checkbox_change(code_key, checkbox_key_in_session):
     st.session_state.manual_edit_codes_checkboxes_state[code_key] = st.session_state[checkbox_key_in_session]
 
@@ -180,7 +224,7 @@ if 'edited_codebook_df' not in st.session_state or st.session_state.get('edited_
     st.session_state.edited_codebook_df = loaded_cb_df.copy()
 
 # --- 1. View Selection ---
-st.subheader("Select Coded Project View(s) for Analysis")
+st.subheader("Select Coded View(s) for Analysis")
 available_views_meta_analysis = data_manager.list_created_views_metadata()
 if not available_views_meta_analysis:
     st.info("No project views created yet. Go to '💾 Data Management' to create views, and '🤖 AI Coding' to code them.")
@@ -213,7 +257,7 @@ else:
 st.divider()
 
 # --- 2. Analysis Table Display & Filter ---
-st.subheader("Analysis Table")
+st.subheader("Coded Views")
 analysis_df_master = st.session_state.get('analysis_table_df', pd.DataFrame()) 
 displayed_analysis_df_view = analysis_df_master.copy()
 
@@ -296,9 +340,27 @@ if not analysis_df_master.empty:
         # Fill NaN with "None" for display
         df_display_filled = df_display.fillna("None")
 
-        saved = set(st.session_state.saved_code_groups.keys())
+        # Determine which (group, code) pairs are new or removed
+        saved_pairs = {
+            (grp, code)
+            for grp, codes in st.session_state.saved_code_groups.items()
+            for code in codes
+        }
+        created_pairs = {
+            (grp, code)
+            for grp, codes in st.session_state.created_code_groups.items()
+            for code in codes
+        }
+        new_pairs = created_pairs - saved_pairs
+        removed_pairs = saved_pairs - created_pairs
         styled_df = df_display_filled.style.apply(
-            lambda row: ["background-color: #e6f2ff" if row["Group Name"] not in saved else "" for _ in row],
+            lambda row: [
+                "background-color: #e6f2ff"
+                if (row["Group Name"], row["Code Name"]) in new_pairs or
+                   (row["Group Name"], row["Code Name"]) in removed_pairs
+                else ""
+                for _ in row
+            ],
             axis=1
         )
         event_groups = st.dataframe(
@@ -317,25 +379,38 @@ if not analysis_df_master.empty:
             if st.button("Save Groups", key="save_groups_btn", use_container_width=True):
                 # Apply grouped labels to the table
                 update_dataframe_groups_column()
-                # Persist to underlying single view file if present
+                # Persist to all selected view files
                 paths = st.session_state.get('analysis_source_view_paths', [])
-                if len(paths) == 1:
+                for path in paths:
                     df_to_save = st.session_state.analysis_table_df.copy()
                     if 'Source View' in df_to_save.columns:
                         df_to_save = df_to_save.drop(columns=['Source View'], errors='ignore')
-                    success = data_manager.save_coded_data_to_view(df_to_save, paths[0])
+                    success = data_manager.save_coded_data_to_view(df_to_save, path)
                     if success:
-                        ui_helpers.show_success_message(f"Groups saved to '{os.path.basename(paths[0])}'.")
+                        ui_helpers.show_success_message(f"Groups saved to '{os.path.basename(path)}'.")
                     else:
-                        ui_helpers.show_error_message(f"Failed to save groups to '{os.path.basename(paths[0])}'.")
-                else:
-                    ui_helpers.show_info("Groups applied in memory. Select a single view to persist.")
+                        ui_helpers.show_error_message(f"Failed to save groups to '{os.path.basename(path)}'.")
+                # Persist master groups overview
+                groups_dir = os.path.join(st.session_state.project_path, "groups")
+                os.makedirs(groups_dir, exist_ok=True)
+                # Build overview DataFrame
+                overview_rows = []
+                for grp, codes in st.session_state.created_code_groups.items():
+                    for c in codes:
+                        overview_rows.append({"Group Name": grp, "Code Name": c})
+                df_overview = pd.DataFrame(overview_rows)
+                # Merge in codebook metadata for full overview
+                codebook_meta = st.session_state.edited_codebook_df.drop(columns=["Select"], errors="ignore")
+                df_overview_full = df_overview.merge(codebook_meta, on="Code Name", how="left")
+                overview_path = os.path.join(groups_dir, "groups_overview.csv")
+                df_overview_full.to_csv(overview_path, index=False)
                 # Mark groups as saved
                 st.session_state.saved_code_groups = st.session_state.created_code_groups.copy()
                 st.rerun()
         st.divider()
     else:
         st.info("No groups defined yet, or no codes assigned to groups.")
+
 
 
     st.subheader("Code Grouping Actions")
@@ -349,12 +424,26 @@ if not analysis_df_master.empty:
             st.info(f"Using AI Provider: **{ai_provider_analysis}**"); ai_model_analysis = None
             if ai_provider_analysis == "OpenAI": ai_model_analysis = st.selectbox("OpenAI Model:", ["gpt-4o", "gpt-4-turbo","gpt-3.5-turbo"], key="ai_model_group_openai_bottom")
             elif ai_provider_analysis == "Gemini": ai_model_analysis = st.selectbox("Gemini Model:", ["gemini-2.0-flash", "gemini-1.5-flash"], key="ai_model_group_gemini_bottom")
-            all_unique_codes = get_unique_codes_from_analysis_table(); codes_already_assigned_ai = get_all_assigned_codes(); unassigned_codes_for_ai = sorted(list(set(all_unique_codes) - codes_already_assigned_ai))
+            # Pull all codes from the master codebook
+            cb_df = st.session_state.edited_codebook_df
+            all_codes = cb_df["Code Name"].dropna().unique().tolist()
+            unassigned_codes_for_ai = sorted(all_codes)
             st.session_state.ai_grouping_prompt_template_p03 = st.text_area("AI Grouping Prompt:", value=st.session_state.ai_grouping_prompt_template_p03, key="ai_group_prompt_input_bottom", height=300)
             if not unassigned_codes_for_ai: st.info("All unique codes are already assigned to groups.")
             elif st.button("Generate Groups with AI", key="ai_generate_groups_btn_bottom", disabled=(not ai_model_analysis)):
                 if '{unique_codes_list_json}' not in st.session_state.ai_grouping_prompt_template_p03: ui_helpers.show_error_message("Prompt needs '{unique_codes_list_json}'.")
                 else:
+                    # Build JSON for existing groups
+                    existing = []
+                    cb_meta = st.session_state.edited_codebook_df
+                    for grp, codes in st.session_state.created_code_groups.items():
+                        ids = []
+                        for code in codes:
+                            match = cb_meta[cb_meta["Code Name"] == code]
+                            if not match.empty:
+                                ids.append(str(match.iloc[0]["code_id"]))
+                        existing.append({"group_name": grp, "codes": codes, "code_ids": ids})
+                    existing_groups_json_str = json.dumps(existing, indent=2)
                     # Build metadata array for unassigned codes
                     code_metadata_list = []
                     cb_meta = st.session_state.edited_codebook_df.drop(columns=["Select"], errors="ignore")
@@ -393,30 +482,27 @@ if not analysis_df_master.empty:
                             })
                     unassigned_codes_json_str = json.dumps(code_metadata_list, indent=2)
                     with st.spinner(f"Sending {len(unassigned_codes_for_ai)} codes to AI..."):
-                        ai_response_groups = ai_services.generate_code_groups_with_ai(unassigned_codes_json_str, st.session_state.ai_grouping_prompt_template_p03, ai_provider_analysis, ai_model_analysis)
+                        prompt_with_groups = st.session_state.ai_grouping_prompt_template_p03.replace("{existing_groups_json}", existing_groups_json_str)
+                        ai_response_groups = ai_services.generate_code_groups_with_ai(unassigned_codes_json_str, prompt_with_groups, ai_provider_analysis, ai_model_analysis)
+                    # Apply AI-suggested groups immediately, update table, then show JSON modal
                     if isinstance(ai_response_groups, list) and all(isinstance(g, dict) and "group_name" in g and "codes" in g for g in ai_response_groups):
-                        new_groups_ai_count = 0; temp_assigned_ai_run = set()
+                        # Build fresh groups dict
+                        new_groups = {}
                         for group_data in ai_response_groups:
-                            ai_g_name = str(group_data.get("group_name", "AI_Group")).strip()
-                            # Clean code names by unescaping any escaped slashes
+                            ai_g_name = str(group_data["group_name"]).strip()
                             raw_codes = group_data.get("codes", []) or []
-                            ai_g_codes = []
-                            for c in raw_codes:
-                                cleaned = str(c).replace("\\/", "/").strip()
-                                if cleaned:
-                                    ai_g_codes.append(cleaned)
-                            if not ai_g_name or not ai_g_codes: logger.warning(f"AI empty group/codes: {group_data}"); continue
-                            valid_codes_new_ai_g = [c for c in ai_g_codes if c in unassigned_codes_for_ai and c not in codes_already_assigned_ai and c not in temp_assigned_ai_run]
-                            if not valid_codes_new_ai_g: logger.info(f"AI group '{ai_g_name}' no valid unassigned codes. Skipping."); continue
-                            final_ai_g_name_unique = ai_g_name; c_u = 1
-                            while final_ai_g_name_unique in st.session_state.created_code_groups: final_ai_g_name_unique = f"{ai_g_name}_{c_u}"; c_u += 1
-                            st.session_state.created_code_groups[final_ai_g_name_unique] = valid_codes_new_ai_g
-                            codes_already_assigned_ai.update(valid_codes_new_ai_g); temp_assigned_ai_run.update(valid_codes_new_ai_g); new_groups_ai_count += 1
-                        if new_groups_ai_count > 0:
-                            ui_helpers.show_success_message(f"AI suggested {new_groups_ai_count} new groups.")
-                        else: ui_helpers.show_info("AI complete. No new valid non-overlapping groups formed.")
-                        st.rerun()
-                    else: err_d = str(ai_response_groups) if ai_response_groups else "No response."; ui_helpers.show_error_message(f"AI failed. Details: {err_d[:200]}..."); logger.error(f"AI group failed: {ai_response_groups}")
+                            cleaned_codes = [str(c).replace("\\/", "/").strip() for c in raw_codes if str(c).strip()]
+                            if ai_g_name and cleaned_codes:
+                                new_groups[ai_g_name] = cleaned_codes
+                        # Update in-memory groups and table
+                        st.session_state.created_code_groups = new_groups
+                        update_dataframe_groups_column()
+                        # Now show the raw JSON for inspection
+                        ai_group_json_dialog()
+                    else:
+                        err_d = str(ai_response_groups) if ai_response_groups else "No response."
+                        ui_helpers.show_error_message(f"AI failed. Details: {err_d[:200]}...")
+                        logger.error(f"AI group failed: {ai_response_groups}")
     
     with tab_manual_edit_group:
         st.header("Manage Group Assignments")
@@ -568,6 +654,8 @@ if not analysis_df_master.empty:
 else: 
     st.info("Select one or more views to load data for analysis and grouping.")
 
+# --- Dialog Definition (moved up to ensure it's defined before use) ---
+
 @st.dialog("Inspect Code Occurrences")
 def inspect_code_occurrences_dialog(title="Inspect Code Occurrences"):
     st.title(title)
@@ -583,3 +671,4 @@ def inspect_code_occurrences_dialog(title="Inspect Code Occurrences"):
         if "inspect_dialog_code_name" in st.session_state:
             del st.session_state.inspect_dialog_code_name
         st.rerun()
+

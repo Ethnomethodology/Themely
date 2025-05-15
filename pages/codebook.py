@@ -12,6 +12,13 @@ from sentence_transformers import SentenceTransformer
 import uuid
 
 logger = utils.setup_logger("p02_ai_coding")
+ui_helpers.page_sidebar_info([
+    "Select View(s) for Coding",
+    "Generate a Codebook based your selected view(s)",
+    "Review codes in your codebook",
+    "Apply codes from your codebook to the selected view(s)"
+])
+
 # Cosine-similarity threshold for duplicate code detection
 DUP_SIM_THRESHOLD = 0.90
 # Try to load the model with ONNXRuntime + dynamic‑INT8 quantization (CPU‑optimized).
@@ -21,7 +28,6 @@ try:
         "sentence-transformers/all-MiniLM-L6-v2",
         device="cpu",
         trust_remote_code=True,          # needed for some ONNX configs
-        quantize="dynamic"               # <─ triggers 8‑bit quant + ONNX if deps are present
     )
     logger.info("Loaded MiniLM with ONNXRuntime (INT8 dynamic quant).")
 except Exception as onnx_err:
@@ -302,12 +308,22 @@ INPUT DATA
                                 derived_ids.append(str(meta.iloc[0]["code_id"]))
                         code_ids_str = ", ".join(derived_ids)
                     st.session_state.data_for_coding_tab3.loc[mask, "code_ids"] = code_ids_str
-                paths = st.session_state.currently_selected_view_filepaths_for_saving_tab3
-                if len(paths) == 1:
-                    df_save = st.session_state.data_for_coding_tab3.copy()
-                    if "Source View" in df_save.columns:
-                        df_save = df_save.drop(columns=["Source View"], errors="ignore")
-                    data_manager.save_coded_data_to_view(df_save, paths[0])
+                # Persist changes to each selected view file
+                selected_views = [
+                    info for info in st.session_state.selected_project_views_info_tab3.values()
+                    if info.get("selected", False)
+                ]
+                for view_info in selected_views:
+                    csv_path = view_info["metadata"]["csv_filepath"]
+                    view_name = view_info["metadata"]["view_name"]
+                    # Filter rows for this view
+                    df_view = st.session_state.data_for_coding_tab3[
+                        st.session_state.data_for_coding_tab3["Source View"] == view_name
+                    ].copy()
+                    # Drop the helper column
+                    df_view = df_view.drop(columns=["Source View"], errors="ignore")
+                    # Save each view
+                    data_manager.save_coded_data_to_view(df_view, csv_path)
             except Exception as merge_err:
                 logger.warning(f"Error merging AI response codes: {merge_err}")
         # Store response and trigger results dialog
@@ -366,7 +382,16 @@ def ai_codebook_generation_modal():
         "• Only create new codes for genuinely new concepts.\n\n"
         f"{existing_codebook_json}\n\n"
     )
-    default_full_prompt = merge_context + st.session_state.ai_codebook_prompt_template
+    full_template = st.session_state.ai_codebook_prompt_template
+    # Break into lines and include intro + goal (first 4 lines)
+    lines = full_template.split('\n')
+    intro_part = '\n'.join(lines[:4])  # researcher intro, blank, GOAL, goal description
+    remainder = '\n'.join(lines[4:])    # rest of template
+    default_full_prompt = (
+        f"{intro_part}\n\n"
+        f"{merge_context}"
+        f"{remainder}"
+    )
     prompt = st.text_area(
         "Full AI Codebook Prompt (editable):",
         value=default_full_prompt,
@@ -790,7 +815,7 @@ def load_and_combine_selected_views_for_coding_p02():
         st.session_state.data_for_coding_tab3 = pd.DataFrame()
         st.session_state.data_for_row_wise_coding_actions = pd.DataFrame()
 
-st.subheader("1. Select Project View(s) for Coding")
+st.subheader("Select View(s) for Coding")
 available_views_meta_p02 = data_manager.list_created_views_metadata()
 if not available_views_meta_p02:
     st.info("No project views created yet. Go to '💾 Data Management' page to create a view.")
@@ -826,7 +851,7 @@ else:
     load_and_combine_selected_views_for_coding_p02()
 st.divider()
 
-st.subheader("2. Data to be Coded")
+st.subheader("Data to be Coded")
 df_data_to_be_coded_sec2 = st.session_state.get('data_for_coding_tab3', pd.DataFrame())
 if df_data_to_be_coded_sec2.empty:
     st.info("Select one or more views from the table above (Section 1) to load data.")
@@ -863,13 +888,13 @@ else:
     # Update codes button for single-row editing
     with btn_col2:
         update_disabled = len(st.session_state.selected_section2_indices) != 1
-        if st.button("Update codes", key="update_codes_btn", disabled=update_disabled, use_container_width=True):
+        if st.button("Update codes", key="update_codes_btn", disabled=update_disabled, use_container_width=True, help="Add/Remove Code manually"):
             update_codes_dialog()
 
     # Delete all codes button for multi-row clearing
     with btn_col3:
         delete_disabled = len(st.session_state.selected_section2_indices) < 1
-        if st.button("Delete all codes", key="delete_all_codes_btn", disabled=delete_disabled, use_container_width=True):
+        if st.button("Delete all codes", key="delete_all_codes_btn", disabled=delete_disabled, use_container_width=True, help="Delete all codes from the selected rows in the above view"):
             # Clear Codes for each selected row
             for row_idx in st.session_state.selected_section2_indices:
                 st.session_state.data_for_coding_tab3.at[row_idx, "Codes"] = ""
@@ -892,7 +917,7 @@ else:
     # Ask AI to Code button
     with btn_col4:
         ask_ai_disabled = st.session_state.data_for_coding_tab3.empty or st.session_state.edited_codebook_df.drop(columns=["Select"], errors="ignore").empty
-        if st.button("Ask AI to Code", key="ask_ai_code_btn", disabled=ask_ai_disabled, use_container_width=True):
+        if st.button("Ask AI to Code", key="ask_ai_code_btn", disabled=ask_ai_disabled, use_container_width=True, help="Use your preferred Generative AI service to apply codes from your codebook to the above view(s)"):
             ask_ai_code_dialog()
 
 # If AI coding has completed, show the results dialog (once)
@@ -903,15 +928,15 @@ st.divider()
 
 
 
-st.subheader("3. Codebook Development")
+st.subheader("Manage Codebook")
 # >>> MOVE_TABLE_HERE >>>
-st.subheader("Current Codebook Draft")
+st.markdown("**Draft Codes**")
 st.caption("Select one or more codebook entries below to inspect their examples.")
 # Buttons for codebook entry
 col_ai, col_manual = st.columns(2)
-if col_ai.button("Ask AI to Generate Codebook", use_container_width=True):
+if col_ai.button("Ask AI to Generate Codebook", use_container_width=True, help="Use Your Preferred AI Service to Generate Code"):
     ai_codebook_generation_modal()
-if col_manual.button("Manual Codebook Entry", use_container_width=True):
+if col_manual.button("Manual Codebook Entry", use_container_width=True, help="Add codes to your codebook manually"):
     manual_codebook_entry_modal()
 # Prepare DataFrame for selection (drop internal columns)
 df_codebook = st.session_state.edited_codebook_df.copy()
@@ -919,8 +944,10 @@ df_select = df_codebook.drop(columns=["Select", "Serial No."], errors="ignore").
 df_select.insert(0, "Serial No.", range(1, len(df_select) + 1))
 # Highlight draft codes (entries not yet saved) with a light blue background
 saved_names = set(st.session_state.current_codebook_df["Code Name"].tolist())
+theme_base = st.get_option("theme.base")
+highlight_color = "#2a3a5f" if theme_base == "dark" else "#e6f2ff"
 styled_select = df_select.style.apply(
-    lambda row: ["background-color: #e6f2ff" if row["Code Name"] not in saved_names else "" for _ in row],
+    lambda row: [f"background-color: {highlight_color}" if row["Code Name"] not in saved_names else "" for _ in row],
     axis=1
 )
 # Display table with built-in multi-row selection
@@ -951,7 +978,7 @@ btn_cols = st.columns(7)
 col_view, col_edit, col_dupfind, col_delete, col_discard, col_save, col_apply = btn_cols
 
 # View Examples
-if col_view.button("View Examples", key="inspect_selected_codebook_examples_btn_main"):
+if col_view.button("View Examples", key="inspect_selected_codebook_examples_btn_main", help="View example datapoints corresponding to this code"):
     selected_indices = st.session_state.get("selected_codebook_indices", [])
     selected_rows_for_inspect = st.session_state.edited_codebook_df.iloc[selected_indices] if selected_indices else pd.DataFrame()
     if selected_rows_for_inspect.empty:
@@ -974,16 +1001,16 @@ if col_view.button("View Examples", key="inspect_selected_codebook_examples_btn_
 
 # Edit Code - enabled only when one row is selected
 edit_disabled = not (len(st.session_state.get("selected_codebook_indices", [])) == 1)
-if col_edit.button("Edit Code", key="edit_codebook_entry_btn", disabled=edit_disabled):
+if col_edit.button("Edit Code", key="edit_codebook_entry_btn", disabled=edit_disabled, help="Select one code to edit its metadata"):
     st.session_state.edit_dialog_selected_index = st.session_state.selected_codebook_indices[0]
     edit_code_dialog()
 
 # Find Duplicates
-if col_dupfind.button("Find Duplicates", key="find_duplicates_btn"):
+if col_dupfind.button("Find Duplicates", key="find_duplicates_btn", help="Find duplicate codes based on semantic similarity"):
     duplicate_codes_dialog()
 
 # Delete Selected
-if col_delete.button("Delete Selected", key="delete_selected_from_draft_btn"):
+if col_delete.button("Delete Selected", key="delete_selected_from_draft_btn", help="Delete selected code from codebook"):
     selected_indices = st.session_state.get("selected_codebook_indices", [])
     selected_for_deletion = st.session_state.edited_codebook_df.iloc[selected_indices] if selected_indices else pd.DataFrame()
     if selected_for_deletion.empty:
@@ -1010,7 +1037,7 @@ if col_delete.button("Delete Selected", key="delete_selected_from_draft_btn"):
         st.rerun()
 
 # Discard Changes
-if col_discard.button("Discard Changes", key="discard_codebook_changes_main"):
+if col_discard.button("Discard Changes", key="discard_codebook_changes_main", help="Discard current draft"):
     loaded_cb_df_discard = data_manager.load_codebook(st.session_state.project_path)
     loaded_cb_df_discard.insert(0, "Select", False)
     st.session_state.current_codebook_df = loaded_cb_df_discard.copy()
@@ -1020,7 +1047,7 @@ if col_discard.button("Discard Changes", key="discard_codebook_changes_main"):
     st.rerun()
 
 # Save Changes
-if col_save.button("Save Changes", key="accept_codebook_changes_main"):
+if col_save.button("Save Changes", key="accept_codebook_changes_main", help="Save current draft"):
     df_to_save_codebook = st.session_state.edited_codebook_df.drop(columns=["Select"], errors="ignore").reset_index(drop=True)
     if data_manager.save_codebook(df_to_save_codebook, st.session_state.project_path):
         loaded_cb_for_edit = df_to_save_codebook.copy()
@@ -1034,7 +1061,7 @@ if col_save.button("Save Changes", key="accept_codebook_changes_main"):
         ui_helpers.show_error_message("Failed to save codebook.")
 
 # Apply Code to selected data rows
-if col_apply.button("Apply Code", key="add_code_section3_btn",
+if col_apply.button("Apply Code Manualy", key="add_code_section3_btn", help="Select one or more rows from both views and codebook to apply code",
                     disabled=(not st.session_state.selected_section2_indices or not st.session_state.selected_codebook_indices)):
     df_to_update = st.session_state.data_for_coding_tab3.copy()
     code_names = st.session_state.edited_codebook_df.loc[
