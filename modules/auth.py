@@ -1,13 +1,13 @@
 # modules/auth.py
 import streamlit as st
 from . import ui_helpers
-from . import utils 
+from . import utils
 import os
-import yaml 
+import yaml
 import time
 # import msal # Removed as OneDrive functionality is removed
 
-logger = utils.setup_logger(__name__) 
+logger = utils.setup_logger(__name__)
 
 # Cloud Authentication Constants and Functions have been removed.
 
@@ -15,9 +15,9 @@ def setup_project_storage(project_name_friendly, storage_type="Local", user_defi
     """
     Sets up project storage. All projects are now 'Local'.
     The config file and all data files will be in user_defined_project_dir.
-    
+
     project_name_friendly: The user-chosen, potentially non-filesystem-safe name.
-    storage_type: Expected to be "Local". This parameter is kept for structural consistency 
+    storage_type: Expected to be "Local". This parameter is kept for structural consistency
                   but its value is effectively ignored and treated as "Local".
     user_defined_project_dir: The absolute path to the directory where the config file
                               and all project data will be stored.
@@ -35,13 +35,13 @@ def setup_project_storage(project_name_friendly, storage_type="Local", user_defi
         ui_helpers.show_error_message("A valid absolute path for the Project Directory is required.")
         return False
 
-    project_config_data = st.session_state.get("project_config", {}).copy() 
-    project_name_for_file = utils.generate_project_id(project_name_friendly) 
+    project_config_data = st.session_state.get("project_config", {}).copy()
+    project_name_for_file = utils.generate_project_id(project_name_friendly)
 
-    project_config_data['project_name'] = project_name_friendly 
+    project_config_data['project_name'] = project_name_friendly
     project_config_data['storage_type'] = "Local" # Explicitly set to Local
-    project_config_data['project_name_for_filename'] = project_name_for_file 
-    project_config_data['project_config_file_directory'] = user_defined_project_dir 
+    project_config_data['project_name_for_filename'] = project_name_for_file
+    project_config_data['project_config_file_directory'] = user_defined_project_dir
 
     try:
         if not os.path.exists(user_defined_project_dir):
@@ -51,10 +51,10 @@ def setup_project_storage(project_name_friendly, storage_type="Local", user_defi
         ui_helpers.show_error_message(f"Could not create project directory '{user_defined_project_dir}': {e}")
         return False
 
-    st.session_state.project_path = user_defined_project_dir 
+    st.session_state.project_path = user_defined_project_dir
 
-    if utils.save_project_config(user_defined_project_dir, project_name_for_file, project_config_data):
-        st.session_state.project_config = project_config_data 
+    if utils.save_project_config(user_defined_project_dir, project_name_for_file, project_config_data): # Ensure project_name_for_file is used
+        st.session_state.project_config = project_config_data
         msg = f"Project '{project_name_friendly}' (Local) configured. Config and data will be in '{user_defined_project_dir}'."
         logger.info(msg)
         return True
@@ -66,29 +66,45 @@ def store_api_keys(reddit_keys, ai_keys, ai_provider):
     if 'project_config' not in st.session_state or not st.session_state.project_config:
         ui_helpers.show_error_message("Project not active. Cannot save API keys.")
         return False
-    
+
     project_config_to_update = st.session_state.project_config.copy()
-    
+
     project_config_to_update['reddit_api'] = reddit_keys
     project_config_to_update['ai_provider'] = ai_provider
+
     if ai_provider == "OpenAI":
         project_config_to_update.pop('gemini_api', None)
+        project_config_to_update.pop('local_ai_config', None) # Remove local config if switching to OpenAI
+        project_config_to_update[f'{ai_provider.lower()}_api'] = ai_keys
     elif ai_provider == "Gemini":
         project_config_to_update.pop('openai_api', None)
-    project_config_to_update[f'{ai_provider.lower()}_api'] = ai_keys
-    
-    config_dir = st.session_state.get('project_path') 
+        project_config_to_update.pop('local_ai_config', None) # Remove local config if switching to Gemini
+        project_config_to_update[f'{ai_provider.lower()}_api'] = ai_keys
+    elif ai_provider == "Local":
+        project_config_to_update.pop('openai_api', None)
+        project_config_to_update.pop('gemini_api', None)
+        # For "Local", ai_keys are not traditional API keys but might hold paths or model selections later.
+        # For now, we just store the provider choice. Specific local model configs can be added to 'local_ai_config'.
+        project_config_to_update['local_ai_config'] = ai_keys if isinstance(ai_keys, dict) else {}
+    else:
+        logger.warning(f"Unknown AI provider '{ai_provider}' during key storage. No AI keys stored.")
+        return False
+
+
+    config_dir = st.session_state.get('project_path')
     project_name_user_given = project_config_to_update.get('project_name')
 
-    if not config_dir: 
+    if not config_dir:
         ui_helpers.show_error_message("Project path (config directory) is not set. Cannot save API keys.")
         return False
     if not project_name_user_given:
         ui_helpers.show_error_message("Project name is missing from current configuration. Cannot save API keys.")
         return False
 
-    if utils.save_project_config(config_dir, project_name_user_given, project_config_to_update):
-        st.session_state.project_config = project_config_to_update 
+    # Use generate_project_id for the filename part when saving.
+    project_id_for_filename = utils.generate_project_id(project_name_user_given)
+    if utils.save_project_config(config_dir, project_id_for_filename, project_config_to_update): # Pass project_id
+        st.session_state.project_config = project_config_to_update
         return True
     else:
         return False
@@ -100,5 +116,7 @@ def validate_api_keys(keys, service_name):
     elif service_name in ["OpenAI", "Gemini"]:
         if keys.get("api_key"): return True
         else: ui_helpers.show_error_message(f"{service_name} API key is missing."); return False
+    elif service_name == "Local":
+        return True # No API key needed for Local provider
     logger.warning(f"validate_api_keys called with unknown service_name: {service_name}")
     return False
